@@ -49,8 +49,10 @@ it.
 - **Reliability and size together.** Every summary reports the share of promises kept, the
   mean hours promised, and the share of cars that received no promise.
 - **Settings fixed before confirmation** (from the data stage on). Tuning will use only data
-  from before the 2020 change. The Jet Propulsion Laboratory site in the same data set will
-  be held back as a replication site and analysed once, after the settings are frozen.
+  from before the 2020 change. The Jet Propulsion Laboratory site in the same data set is
+  held back as a replication site: the loader refuses it unless explicitly unsealed, a test
+  checks that no library code does so, and it will be analysed once, after the settings are
+  frozen.
 - **Every output records how it was made.** Each run writes a manifest with the code
   commit, parameters, package versions and a fingerprint of its input.
 
@@ -70,8 +72,16 @@ manifest to `results/demo/`. It checks that everything runs; it is not a result.
 ## Data
 
 Session data come from [Caltech ACN-Data](https://ev.caltech.edu/dataset), available for
-educational and research use after registration. The data are not redistributed here; the
-download script will use the reader's own access token. If you use the data, cite:
+educational and research use after registration. The data are not redistributed here. With
+your own access token in `ACN_API_TOKEN` (or in `~/.config/acndata/api_key`):
+
+```bash
+uv run staypromise fetch caltech    # about 30 minutes; stored under data/, never committed
+uv run staypromise verify caltech   # same data as this repository's fingerprints/caltech.csv?
+```
+
+`docs/data.md` describes what is downloaded, the cleaning rules and their counts, and a check
+of the download against an independent public copy. If you use the data, cite:
 
 > Z. J. Lee, T. Li and S. H. Low. ACN-Data: Analysis and Applications of an Open EV
 > Charging Dataset. *Proceedings of the Tenth International Conference on Future Energy
@@ -81,6 +91,9 @@ download script will use the reader's own access token. If you use the data, cit
 
 ```
 src/staypromise/
+  acn.py         ACN-Data download, month by month, with fingerprints
+  data.py        stored months to the session table; cleaning rules and flags
+  snapshots.py   comparison with an independent public copy of the Caltech data
   sessions.py    the session table and its checks
   interface.py   what a rule may see: Request, History, Outcome
   engine.py      event-by-event replay; the only reader of true departure times
@@ -91,8 +104,9 @@ src/staypromise/
   synthetic.py   made-up sessions with known behaviour
   figures.py     figures, each drawn from a table that is also written to disk
   pipeline.py    end-to-end runs with manifests
-tests/           unit tests, including the look-ahead tests
-docs/            analysis plan and discovery log
+tests/           unit tests, including the look-ahead tests (no network needed)
+fingerprints/    SHA-256 of every downloaded month, so others can confirm the same data
+docs/            data notes, analysis plan and discovery log
 ```
 
 ## Licence
