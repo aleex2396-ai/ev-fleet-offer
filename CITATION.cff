@@ -1,0 +1,10 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "ev-stay-promise: reliable lower bounds on EV dwell time when driver behaviour changes"
+type: software
+authors:
+  - family-names: Lu
+    given-names: Weixuan
+repository-code: "https://github.com/aleex2396-ai/ev-stay-promise"
+license: MIT
+version: 0.1.0.dev0

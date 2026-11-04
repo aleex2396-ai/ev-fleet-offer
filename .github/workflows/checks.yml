@@ -1,0 +1,37 @@
+name: checks
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install the locked environment
+        run: uv sync --locked
+
+      - name: Lint
+        run: |
+          uv run ruff check .
+          uv run ruff format --check .
+
+      - name: Tests, including the look-ahead checks
+        run: uv run pytest
+
+      - name: Run the pipeline end to end on made-up data
+        run: uv run staypromise demo --out results/demo
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: demo-run
+          path: results/demo/

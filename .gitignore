@@ -1,0 +1,24 @@
+# Data and outputs are rebuilt from scripts, never committed.
+data/
+results/
+
+# Credentials: never committed.
+.key/
+.env
+*.token
+*api_key*
+
+# Python and tools
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+build/
+dist/
+*.egg-info/
+
+# Editors and OS
+.DS_Store
+.idea/
+.vscode/
