@@ -11,10 +11,11 @@ scores, always reported together: how often its commitments hold (coverage) and 
 they are (hours committed).
 
 When behaviour changes, there are two principled ways to keep such a commitment reliable.
-One estimates how far the distribution of stays has drifted and makes the commitment robust
-to that much drift (distributionally robust optimisation under drift). The other estimates
-nothing about the drift: it corrects the commitment online from its own record of kept and
-broken commitments (adaptive conformal inference). They offer different kinds of guarantee:
+One estimates a budget for how far the distribution of stays can drift as data age, and
+treats each past stay as uncertain by an amount that grows with that budget before setting
+the commitment (a robust sample approximation of a chance constraint under drift). The
+other estimates nothing about the drift: it corrects the commitment online from its own
+record of kept and broken commitments (adaptive conformal inference). They offer different kinds of guarantee:
 the first holds with high probability under assumptions about the drift; the second holds
 on average over time with no such assumptions. The simplest alternative to both is a rolling
 window of recent sessions.

@@ -38,9 +38,15 @@ May to August 2021. What was learned:
   afterwards, depending on how it was fitted and the month; rolling-window bounds recovered
   to about 85% to 95%;
 - distances between months' stay distributions, and the drift radius and sample size that
-  the distributionally robust guarantee of Yan, Parise and Bitar (2022) would need at these
-  distances;
-- the day-to-day dispersion of early departures in summer 2021.
+  the guarantee of Yan, Parise and Bitar (2022) for chance constraints under drift would need
+  at these distances;
+- the day-to-day dispersion of early departures in summer 2021;
+- on the public extracts of May to August 2019 and 2021: the distance between the two
+  summers' stay distributions; a lower bound fitted in summer 2019 (kept in 61% to 62% of
+  2021 sessions); rolling windows of 100, 300 and 1,000 sessions; a fleet-level promise (cars
+  plugged in at 2 pm on weekdays; one fitted in summer 2019 held on no 2021 weekday); and
+  the promise sizes of the Yan, Parise and Bitar rule with fixed drift values (0.52 to 0.75
+  hours at zero drift). These were run in November 2026, while this project was being scoped.
 
 ## Jet Propulsion Laboratory (replication site)
 
@@ -64,11 +70,12 @@ Counts only, and one month checked for driver IDs (none). It has no sessions bef
 ## Not looked at
 
 At neither site has any rule with an online correction from its own record of kept and
-broken promises (adaptive conformal inference) been run, nor a distributionally robust rule
-with its drift allowance estimated from the data as it arrives (the radius such a rule would
-need was computed, as listed above, but no promise from it was made or scored). The hours each of the three
-headline rules commits and how fast each recovers after the closure have not been measured
-at either site.
+broken promises (adaptive conformal inference) been run, nor the drift-aware rule of Yan,
+Parise and Bitar with its drift allowance estimated from the data as it arrives (it was run
+at Caltech only with fixed drift values, as listed above). The hours committed by adaptive
+conformal and by the drift-aware rule with an estimated allowance, how fast each of the
+three headline rules recovers after the closure, and the fleet-level comparison across rules
+have not been measured at either site.
 
 ## Looks made as part of this repository
 

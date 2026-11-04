@@ -1,7 +1,7 @@
 """What a rule is allowed to see.
 
-A rule answers one question at a time: "how many more hours can we promise this car will
-stay?" It is given three things, and nothing else:
+A rule answers one question at a time: "how many more hours can be promised that this car
+will stay?" It is given three things, and nothing else:
 
 - a `Request`: the car being asked about, with only what is known at the decision time;
 - a `History`: every session that plugged in strictly before the decision time, with its

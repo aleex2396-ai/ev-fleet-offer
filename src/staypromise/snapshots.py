@@ -67,7 +67,7 @@ def window_of(name: str) -> tuple[pd.Timestamp, pd.Timestamp]:
 
 
 def compare(snapshot: pd.DataFrame, sessions: pd.DataFrame, name: str) -> dict:
-    """Counts of agreement between one snapshot and our sessions over the same days."""
+    """Counts of agreement between one snapshot and the downloaded sessions on the same days."""
     start, end = window_of(name)
     ours = sessions[(sessions["connect_time"] >= start) & (sessions["connect_time"] < end)]
     both = snapshot.merge(ours, on="session_id", suffixes=("_snap", "_ours"))
