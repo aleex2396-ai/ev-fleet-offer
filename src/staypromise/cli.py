@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from staypromise import acn, data, snapshots
+from staypromise import acn, data, snapshots, theory
 from staypromise.pipeline import run_demo
 
 # The months each site has sessions in the public API (checked 4 Nov 2026).
@@ -48,6 +48,11 @@ def main(argv: list[str] | None = None) -> int:
     snap.add_argument("snapshots", type=Path, help="folder holding the four pinned CSV files")
     snap.add_argument("--data", type=Path, default=Path("data"))
 
+    commands.add_parser(
+        "requirements",
+        help="samples and widening the drift-aware guarantee needs for a 90%% promise",
+    )
+
     args = parser.parse_args(argv)
     if args.command == "demo":
         manifest = run_demo(args.out, seed=args.seed)
@@ -73,7 +78,10 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "snapshot-check":
         sessions, counts = data.load_sessions(args.data, "caltech")
         print("cleaning:", ", ".join(f"{k} {v}" for k, v in counts.items()))
-        print(snapshots.check_all(args.snapshots, sessions).to_string(index=False))
+        sealed_from = data.TEST_PERIODS["caltech"]
+        print(snapshots.check_all(args.snapshots, sessions, sealed_from).to_string(index=False))
+    elif args.command == "requirements":
+        print(theory.requirements_table().to_string(index=False))
     return 0
 
 

@@ -50,10 +50,12 @@ it.
 - **Reliability and size together.** Every summary reports the share of promises kept, the
   mean hours promised, and the share of cars that received no promise.
 - **Settings fixed before confirmation** (from the data stage on). Tuning will use only data
-  from before the 2020 change. The Jet Propulsion Laboratory site in the same data set is
-  held back as a replication site: the loader refuses it unless explicitly unsealed, a test
-  checks that no library code does so, and it will be analysed once, after the settings are
-  frozen.
+  from before the 2020 change, and every setting comes from a rule written down before any
+  run. Caltech sessions from 1 March 2020, the main test period, are sealed in the loader:
+  they open only once the analysis plan's git tag (`analysis-plan`) exists. The Jet
+  Propulsion Laboratory site in the same data set is held back as a replication site: the
+  loader refuses it unless explicitly unsealed, and it will be analysed once, after the
+  settings are frozen. A test checks that no library code unseals either.
 - **Every output records how it was made.** Each run writes a manifest with the code
   commit, parameters, package versions and a fingerprint of its input.
 
@@ -81,8 +83,10 @@ uv run staypromise fetch caltech    # about 30 minutes; stored under data/, neve
 uv run staypromise verify caltech   # same data as this repository's fingerprints/caltech.csv?
 ```
 
-`docs/data.md` describes what is downloaded, the cleaning rules and their counts, and a check
-of the download against an independent public copy. If you use the data, cite:
+`docs/data.md` describes what is downloaded, the cleaning rules and their counts, the sealed
+test period, and a check of the download against an independent public copy.
+`docs/theory.md` states the guarantees behind the rules with their theorem numbers; its
+table of required sample sizes is printed by `uv run staypromise requirements`. If you use the data, cite:
 
 > Z. J. Lee, T. Li and S. H. Low. ACN-Data: Analysis and Applications of an Open EV
 > Charging Dataset. *Proceedings of the Tenth International Conference on Future Energy
@@ -107,7 +111,7 @@ src/staypromise/
   pipeline.py    end-to-end runs with manifests
 tests/           unit tests, including the look-ahead tests (no network needed)
 fingerprints/    SHA-256 of every downloaded month, so others can confirm the same data
-docs/            data notes, analysis plan and discovery log
+docs/            data notes, theory requirements, analysis plan and discovery log
 ```
 
 ## Licence

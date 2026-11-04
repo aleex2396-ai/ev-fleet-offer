@@ -91,12 +91,20 @@ def compare(snapshot: pd.DataFrame, sessions: pd.DataFrame, name: str) -> dict:
     }
 
 
-def check_all(folder: Path, sessions: pd.DataFrame) -> pd.DataFrame:
-    """Compare every pinned snapshot in `folder` with `sessions` (the cleaned Caltech table)."""
+def check_all(
+    folder: Path, sessions: pd.DataFrame, sealed_from: pd.Timestamp | None = None
+) -> pd.DataFrame:
+    """Compare every pinned snapshot in `folder` with `sessions` (the cleaned Caltech table).
+
+    A snapshot reaching into a sealed period (from `sealed_from` on) is listed but not compared.
+    """
     rows = []
     for name in FILES:
+        if sealed_from is not None and window_of(name)[1] > sealed_from:
+            rows.append({"file": name, "status": "sealed test period"})
+            continue
         path = Path(folder) / name
         if not path.exists():
             raise SnapshotError(f"missing {name}; see the module docstring for where to get it")
-        rows.append(compare(read_snapshot(path), sessions, name))
+        rows.append({**compare(read_snapshot(path), sessions, name), "status": "compared"})
     return pd.DataFrame(rows)

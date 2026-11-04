@@ -55,3 +55,10 @@ def test_radius_is_drift_over_theta():
     assert theory.radius(0.07, 0.025) == pytest.approx(2.8)
     with pytest.raises(ValueError):
         theory.radius(0.07, 0.0)
+
+
+def test_requirements_table_reports_both_routes(monkeypatch):
+    monkeypatch.setattr(theory, "TABLE_PAIRS", ((0.02, 0.04),))
+    monkeypatch.setattr(theory, "TABLE_CANDIDATES", (25,))
+    row = theory.requirements_table().iloc[0]
+    assert (row["widening"], row["theorem4"], row["corollary1"]) == (25.0, 253, 1943)

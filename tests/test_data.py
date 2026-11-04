@@ -1,6 +1,7 @@
-"""Parsing, cleaning, flags and the replication seal, on made-up records."""
+"""Parsing, cleaning, flags and the two seals, on made-up records."""
 
 import ast
+import subprocess
 from pathlib import Path
 
 import pandas as pd
@@ -122,3 +123,73 @@ def test_no_library_code_unseals_the_replication_site():
                 if not passes_through:
                     offenders.append(f"{path.name}:{node.lineno}")
     assert offenders == []
+
+
+# Caltech's test period starts at midnight Pacific on 1 March 2020, which is 08:00 UTC.
+BOUNDARY = [
+    api_record(10, "Sat, 29 Feb 2020 20:00:00 GMT", "Sun, 01 Mar 2020 01:00:00 GMT"),
+    api_record(
+        11,
+        "Sun, 01 Mar 2020 07:30:00 GMT",
+        "Sun, 01 Mar 2020 09:00:00 GMT",
+        user=5,
+        inputs=[("Sun, 01 Mar 2020 07:30:05 GMT", 90)],
+    ),
+    api_record(
+        12,
+        "Sun, 01 Mar 2020 08:30:00 GMT",
+        "Sun, 01 Mar 2020 10:00:00 GMT",
+        user=5,
+        inputs=[("Sun, 01 Mar 2020 08:30:05 GMT", 60)],
+    ),
+    api_record(13, "Tue, 01 Jun 2021 15:00:00 GMT", "Tue, 01 Jun 2021 17:00:00 GMT"),
+]
+
+
+def store_boundary(tmp_path):
+    acn.save_month(tmp_path, "caltech", "2020-02", BOUNDARY[:1])
+    acn.save_month(tmp_path, "caltech", "2020-03", BOUNDARY[1:3])
+    acn.save_month(tmp_path, "caltech", "2021-06", BOUNDARY[3:])
+
+
+def test_caltech_test_period_is_sealed_by_default(tmp_path):
+    store_boundary(tmp_path)
+    kept, _ = data.load_sessions(tmp_path, "caltech")
+    assert sorted(kept["session_id"]) == ["s10", "s11"]
+    assert set(data.load_user_inputs(tmp_path, "caltech")["session_id"]) == {"s11"}
+
+
+def test_caltech_test_period_opens_only_once_the_plan_is_tagged(tmp_path, monkeypatch):
+    store_boundary(tmp_path)
+    monkeypatch.setattr(data, "plan_is_tagged", lambda: False)
+    with pytest.raises(data.SealedPeriodError):
+        data.load_sessions(tmp_path, "caltech", unseal=True)
+    monkeypatch.setattr(data, "plan_is_tagged", lambda: True)
+    kept, _ = data.load_sessions(tmp_path, "caltech", unseal=True)
+    assert sorted(kept["session_id"]) == ["s10", "s11", "s12", "s13"]
+
+
+def git(repo, *args):
+    subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
+
+
+def test_plan_tag_is_read_from_git(tmp_path, monkeypatch):
+    git(tmp_path, "init", "-q")
+    git(
+        tmp_path,
+        "-c",
+        "user.name=t",
+        "-c",
+        "user.email=t@t",
+        "commit",
+        "-q",
+        "--allow-empty",
+        "-m",
+        "start",
+    )
+    monkeypatch.setattr(data, "REPO", tmp_path)
+    assert not data.plan_is_tagged()
+    git(tmp_path, "tag", data.PLAN_TAG)
+    assert data.plan_is_tagged()
+    monkeypatch.setattr(data, "REPO", tmp_path / "not-a-repository")
+    assert not data.plan_is_tagged()

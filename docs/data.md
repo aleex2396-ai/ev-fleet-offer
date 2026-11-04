@@ -39,6 +39,20 @@ Both sites fall to a few dozen sessions a month from April 2020, during the camp
 The counts per month are in `fingerprints/`. JPL's first and last plug-in dates are not given
 here because finding them means loading its sessions.
 
+## Sealed data
+
+Two parts of the download are sealed in code (`data.py`), so the public history shows they
+were not read before the analysis was fixed:
+
+- **Caltech from 1 March 2020 (Pacific time)**, the main test period. The loaders return only
+  sessions plugged in before it. They open the rest only once the analysis plan's git tag,
+  `analysis-plan`, exists in the repository.
+- **JPL**, the replication site. The loaders refuse it unless explicitly unsealed, which only
+  the replication run does, after the settings are frozen.
+
+A test checks that no library code unseals either. Earlier looks at both, made before the
+seals existed, are listed in `prior-looks.md`.
+
 ## Cleaning
 
 Cleaning drops only records that cannot be a charging session, in this order, and counts each:
@@ -50,9 +64,10 @@ Cleaning drops only records that cannot be a charging session, in this order, an
 Nothing is dropped for being unusual: very short and very long stays stay in, because a
 promise rule meets them in practice.
 
-Caltech: of 31,424 records, none was dropped by any of the three rules. JPL's counts will be
-reported with the replication run: its months are downloaded and fingerprinted, but its
-sessions are not loaded into any table before then.
+Caltech: of 31,424 records, none was dropped by any of the three rules (counted before the
+test-period seal was added; before 1 March 2020, 27,584 records, none dropped). JPL's counts
+will be reported with the replication run: its months are downloaded and fingerprinted, but
+its sessions are not loaded into any table before then.
 
 ## What drivers typed
 
@@ -88,6 +103,8 @@ the download over the same Pacific-time days:
 | February to May 2020 | 1,269 | 1,269 | 1,269 | 1,269 | 1,269 |
 | May to August 2021 | 1,829 | 1,829 | 1,829 | 1,829 | 1,829 |
 
-All 9,802 sessions agree exactly, including the time-zone conversion. The extracts have no
-driver IDs, and in their unclaimed rows the "estimated departure" is a copy of the actual
-departure, so they are used here only for this check.
+All 9,802 sessions agree exactly, including the time-zone conversion. This comparison was
+run before the test-period seal was added and reports agreement counts only; since the seal,
+`snapshot-check` compares the two extracts from before March 2020 and lists the other two as
+sealed. The extracts have no driver IDs, and in their unclaimed rows the "estimated
+departure" is a copy of the actual departure, so they are used here only for this check.

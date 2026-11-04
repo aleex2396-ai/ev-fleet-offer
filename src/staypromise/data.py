@@ -13,12 +13,20 @@ descriptive flags about it (claimed by a known driver, typed entry recorded at t
 as the plug-in, typed stay of exactly 60 or 480 minutes); they describe how the data were
 recorded and are not used to drop anything.
 
-The replication site is sealed: `load_sessions` refuses it unless ``unseal=True`` is passed,
-which only the replication run does, after the analysis settings are frozen.
+Two parts of the data are sealed, so the public history shows they were not read before the
+analysis was fixed:
+
+- The replication site (JPL): `load_sessions` refuses it unless ``unseal=True`` is passed,
+  which only the replication run does, after the analysis settings are frozen.
+- Caltech's main test period, sessions plugged in from 1 March 2020 (Pacific time): by
+  default the loaders return only the sessions before it. ``unseal=True`` opens it, and only
+  once the analysis plan's git tag (`PLAN_TAG`) exists in the repository.
 """
 
 from __future__ import annotations
 
+import subprocess
+from datetime import UTC, datetime
 from pathlib import Path
 
 import numpy as np
@@ -27,11 +35,41 @@ import pandas as pd
 from staypromise.acn import months_between, raw_path, read_month
 
 SEALED_SITES = frozenset({"jpl"})
+TEST_PERIODS = {"caltech": pd.Timestamp("2020-03-01", tz="America/Los_Angeles")}
+PLAN_TAG = "analysis-plan"
+REPO = Path(__file__).resolve().parents[2]
 _TIME = "%a, %d %b %Y %H:%M:%S GMT"
 
 
 class SealedSiteError(PermissionError):
     """The replication site was requested before it was unsealed."""
+
+
+class SealedPeriodError(PermissionError):
+    """A main test period was requested before the analysis plan was tagged."""
+
+
+def plan_is_tagged() -> bool:
+    """True if the analysis plan's tag exists in the git repository holding this code."""
+    try:
+        found = subprocess.run(
+            ["git", "-C", str(REPO), "tag", "--list", PLAN_TAG],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return found.stdout.strip() == PLAN_TAG
+
+
+def _plugged_in_before(item: dict, start: pd.Timestamp) -> bool:
+    try:
+        when = datetime.strptime(item.get("connectionTime") or "", _TIME).replace(tzinfo=UTC)
+    except ValueError:
+        return False
+    return when < start
 
 
 def _times(values: pd.Series) -> pd.Series:
@@ -168,9 +206,22 @@ def load_items(data_root: Path, site: str, *, unseal: bool = False) -> list[dict
             f"{site} is the sealed replication site; it is analysed once, after the settings "
             "are frozen"
         )
+    start = TEST_PERIODS.get(site)
+    if start is not None and unseal and not plan_is_tagged():
+        raise SealedPeriodError(
+            f"{site} sessions from {start:%d %B %Y} are the main test period; they open only "
+            f"once the '{PLAN_TAG}' tag exists in git"
+        )
+    sealed = start is not None and not unseal
     items: list[dict] = []
     for month in stored_months(data_root, site):
-        items.extend(read_month(data_root, site, month))
+        first = pd.Timestamp(f"{month}-01", tz="UTC")
+        if sealed and first >= start:
+            continue
+        month_items = read_month(data_root, site, month)
+        if sealed and first + pd.DateOffset(months=1) > start:
+            month_items = [item for item in month_items if _plugged_in_before(item, start)]
+        items.extend(month_items)
     return items
 
 

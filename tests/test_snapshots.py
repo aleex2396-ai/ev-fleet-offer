@@ -81,3 +81,15 @@ def test_read_and_compare(tmp_path, monkeypatch):
         "max_gap_s": 2.0,
         "claimed_agree": 2,
     }
+
+
+def test_check_all_lists_but_does_not_compare_sealed_snapshots(tmp_path, monkeypatch):
+    path = write(tmp_path / NAME, CSV)
+    later = "2021-05-01 2021-08-31.csv.gz"
+    sha = hashlib.sha256(path.read_bytes()).hexdigest()
+    monkeypatch.setattr(snapshots, "FILES", {NAME: sha, later: "not needed"})
+    table = ours([("a", "2019-05-01 08:18:45", "2019-05-01 22:52:36", "42")])
+    sealed_from = pd.Timestamp("2020-03-01", tz="America/Los_Angeles")
+    result = snapshots.check_all(tmp_path, table, sealed_from)
+    assert list(result["status"]) == ["compared", "sealed test period"]
+    assert result.loc[0, "both"] == 1

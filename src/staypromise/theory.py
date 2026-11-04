@@ -25,6 +25,7 @@ and the constraint is x <= stay; eps = 0.10 for a 90% promise.
 import math
 
 import numpy as np
+import pandas as pd
 
 
 def _check_corollary1(eps: float, alpha: float, theta: float, delta: float, n_candidates: int):
@@ -95,3 +96,28 @@ def radius(rho: float, theta: float) -> float:
     if theta <= 0:
         raise ValueError("theta must be positive")
     return rho / theta
+
+
+# Settings for the requirements table: a 90% promise (eps = 0.10) at 95% confidence, promises
+# on a grid from 0 to 24 hours in steps of 1 hour (25 candidates) or 15 minutes (97), and four
+# (alpha, theta) pairs inside Corollary 1's ranges.
+TABLE_PAIRS = ((0.02, 0.04), (0.05, 0.025), (0.05, 0.04), (0.08, 0.01))
+TABLE_CANDIDATES = (25, 97)
+
+
+def requirements_table(eps: float = 0.10, delta: float = 0.05) -> pd.DataFrame:
+    """Samples needed by Theorem 4 and by Corollary 1, and the widening factor 1 / theta."""
+    rows = []
+    for n_candidates in TABLE_CANDIDATES:
+        for alpha, theta in TABLE_PAIRS:
+            rows.append(
+                {
+                    "candidates": n_candidates,
+                    "alpha": alpha,
+                    "theta": theta,
+                    "widening": round(1 / theta, 1),
+                    "theorem4": theorem4_sample_size(eps, alpha, theta, delta, n_candidates),
+                    "corollary1": corollary1_sample_size(eps, alpha, theta, delta, n_candidates),
+                }
+            )
+    return pd.DataFrame(rows)
