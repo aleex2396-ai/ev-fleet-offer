@@ -5,8 +5,8 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from staypromise.interface import History, Outcome, Request, Rule
-from staypromise.sessions import to_hours
+from fleetoffer.data import to_hours
+from fleetoffer.interface import History, Outcome, Request, Rule
 
 T0 = pd.Timestamp("2001-01-01 00:00", tz="UTC")
 
@@ -31,8 +31,31 @@ def hours_from_t0(h: float) -> float:
     return float(to_hours(pd.Series([T0])).item() + h)
 
 
+class FixedBound(Rule):
+    """The same bound for every car; a reference in checks."""
+
+    def __init__(self, hours: float) -> None:
+        self.hours = float(hours)
+        self.name = f"fixed {hours:g} h"
+
+    def bound(self, request: Request, history: History) -> float:
+        return self.hours
+
+
+class CountsLaterSessions(Rule):
+    """Cheats with counts alone: bounds each car by how many sessions the table holds."""
+
+    name = "cheat: counts later sessions"
+
+    def __init__(self, sessions: pd.DataFrame) -> None:
+        self.hours = len(sessions) / 1000.0
+
+    def bound(self, request: Request, history: History) -> float:
+        return self.hours
+
+
 class Spy(Rule):
-    """Promises a fixed number of hours and records everything it is shown, in order."""
+    """Bounds every car at a fixed number of hours and records everything it is shown."""
 
     name = "spy"
 
@@ -41,7 +64,7 @@ class Spy(Rule):
         self.events: list[tuple] = []
         self.windows: dict[str, object] = {}
 
-    def promise(self, request: Request, history: History) -> float:
+    def bound(self, request: Request, history: History) -> float:
         self.events.append(("decision", request.decision_h, request.session_id))
         self.windows[request.session_id] = history.window()
         return self.hours
@@ -51,22 +74,22 @@ class Spy(Rule):
 
 
 class StepAdjust(Rule):
-    """Learns only from outcomes: promise more after a kept promise, less after a broken one."""
+    """Learns only from outcomes: bound more after a bound held, less after one failed."""
 
     name = "step adjust"
 
     def __init__(self) -> None:
         self.hours = 1.0
 
-    def promise(self, request: Request, history: History) -> float:
+    def bound(self, request: Request, history: History) -> float:
         return self.hours
 
     def observe(self, outcome: Outcome) -> None:
-        self.hours = max(0.0, self.hours + (0.05 if outcome.kept else -0.45))
+        self.hours = max(0.0, self.hours + (0.05 if outcome.held else -0.45))
 
 
 class PeekAtDeparture(Rule):
-    """Cheats: built from the full table, it promises 99% of each car's true remaining stay."""
+    """Cheats: built from the full table, it bounds at 99% of each car's true remaining stay."""
 
     name = "cheat: peek"
 
@@ -75,7 +98,7 @@ class PeekAtDeparture(Rule):
             zip(sessions["session_id"], to_hours(sessions["disconnect_time"]), strict=True)
         )
 
-    def promise(self, request: Request, history: History) -> float:
+    def bound(self, request: Request, history: History) -> float:
         return 0.99 * max(self.departure_h[request.session_id] - request.decision_h, 0.0)
 
 
@@ -88,5 +111,5 @@ class QuantileOfEverything(Rule):
         stays = (sessions["disconnect_time"] - sessions["connect_time"]) / pd.Timedelta(hours=1)
         self.hours = float(np.quantile(stays, 0.1))
 
-    def promise(self, request: Request, history: History) -> float:
+    def bound(self, request: Request, history: History) -> float:
         return self.hours

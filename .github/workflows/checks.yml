@@ -28,8 +28,8 @@ jobs:
       - name: Tests, including the look-ahead checks
         run: uv run pytest
 
-      - name: Run the pipeline end to end on made-up data
-        run: uv run staypromise demo --out results/demo
+      - name: Run the pipeline end to end on made-up fleets
+        run: uv run fleetoffer demo --out results/demo
 
       - uses: actions/upload-artifact@v4
         with:

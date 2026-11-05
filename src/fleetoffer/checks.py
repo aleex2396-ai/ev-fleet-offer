@@ -1,10 +1,12 @@
-"""The look-ahead check: a rule's promises must not depend on anything that has not happened.
+"""The look-ahead check: a rule's bounds must not depend on anything that has not happened.
 
 For each of several cutoff times, the check replays a rule twice: once on the real session
 table, and once on a copy in which everything at or after the cutoff has been scrambled
 (departures moved to just after the cutoff or far beyond it, later sessions dropped and
-made-up ones added). Every promise made before the cutoff must come out identical. If one
-differs, the rule used information from the future.
+made-up ones added). Every bound given before the cutoff must come out identical. If one
+differs, the rule used information from the future. The later values are drawn from a
+different distribution, not permuted, so a rule that uses only counts of later events is
+caught too.
 
 A cutoff only exposes decisions shortly before it (those are the ones with cars still
 plugged in across it), so the default uses several cutoffs spread over busy times.
@@ -21,13 +23,13 @@ from collections.abc import Callable
 import numpy as np
 import pandas as pd
 
-from staypromise.engine import replay
-from staypromise.interface import Rule
-from staypromise.sessions import validate_sessions
+from fleetoffer.data import validate_sessions
+from fleetoffer.engine import Daily, replay
+from fleetoffer.interface import Rule
 
 
 class LookaheadError(AssertionError):
-    """A rule's promises before the cutoff changed when only the future changed."""
+    """A rule's bounds before the cutoff changed when only the future changed."""
 
 
 def scramble_future(sessions: pd.DataFrame, cutoff: pd.Timestamp, *, seed: int = 0) -> pd.DataFrame:
@@ -37,7 +39,7 @@ def scramble_future(sessions: pd.DataFrame, cutoff: pd.Timestamp, *, seed: int =
     rng = np.random.default_rng(seed)
 
     # Departures at or after the cutoff are re-drawn, still at or after it: half to within
-    # three minutes of it, half to many hours later, so any use of them moves the promises.
+    # three minutes of it, half to many hours later, so any use of them moves the bounds.
     later = table["disconnect_time"] >= cutoff
     n_later = int(later.sum())
     floor = table.loc[later, "connect_time"].where(
@@ -47,11 +49,12 @@ def scramble_future(sessions: pd.DataFrame, cutoff: pd.Timestamp, *, seed: int =
     redraw = np.where(soon, rng.uniform(0.0, 0.05, n_later), rng.uniform(12.0, 48.0, n_later))
     table.loc[later, "disconnect_time"] = floor + pd.to_timedelta(redraw + 1e-4, unit="h")
 
-    # Half of the sessions that plug in at or after the cutoff are dropped; made-up ones added.
+    # Half of the sessions that plug in at or after the cutoff are dropped and more made-up
+    # ones are added than were dropped, so the number of later sessions changes too.
     future = table.index[table["connect_time"] >= cutoff]
     drop = rng.choice(future, size=len(future) // 2, replace=False) if len(future) else []
     table = table.drop(index=drop)
-    n_new = max(10, len(future) // 2)
+    n_new = len(future) // 2 + 10
     starts = cutoff + pd.to_timedelta(rng.uniform(0.0, 24.0 * 30, n_new), unit="h")
     added = pd.DataFrame(
         {
@@ -80,9 +83,10 @@ def check_no_lookahead(
     cutoffs: pd.Timestamp | list[pd.Timestamp] | None = None,
     *,
     every_h: float | None = None,
+    daily: Daily | None = None,
     seed: int = 0,
 ) -> int:
-    """Raise `LookaheadError` if any promise before a cutoff depends on what follows it.
+    """Raise `LookaheadError` if any bound before a cutoff depends on what follows it.
 
     Returns the number of decisions compared, so a caller can make sure it was not zero.
     """
@@ -91,38 +95,40 @@ def check_no_lookahead(
     elif isinstance(cutoffs, pd.Timestamp):
         cutoffs = [cutoffs]
     return sum(
-        _check_one_cutoff(rule_factory, sessions, cutoff, every_h=every_h, seed=seed + k)
+        _check_one_cutoff(
+            rule_factory, sessions, cutoff, every_h=every_h, daily=daily, seed=seed + k
+        )
         for k, cutoff in enumerate(cutoffs)
     )
 
 
-def _check_one_cutoff(rule_factory, sessions, cutoff, *, every_h, seed) -> int:
+def _check_one_cutoff(rule_factory, sessions, cutoff, *, every_h, daily, seed) -> int:
     real = validate_sessions(sessions)
     scrambled = scramble_future(real, cutoff, seed=seed)
     cutoff = pd.Timestamp(cutoff).tz_convert("UTC")
 
     def before(table: pd.DataFrame) -> pd.DataFrame:
-        decisions = replay(table, rule_factory(table), every_h=every_h)
+        decisions = replay(table, rule_factory(table), every_h=every_h, daily=daily)
         early = decisions[decisions["decision_time"] < cutoff]
-        cols = ["session_id", "decision_time", "offered", "promised_h"]
+        cols = ["session_id", "decision_time", "given", "bound_h"]
         return early[cols].sort_values(["decision_time", "session_id"]).reset_index(drop=True)
 
     a, b = before(real), before(scrambled)
     if (
         len(a) != len(b)
         or not (
-            a[["session_id", "decision_time", "offered"]]
-            == b[["session_id", "decision_time", "offered"]]
+            a[["session_id", "decision_time", "given"]]
+            == b[["session_id", "decision_time", "given"]]
         )
         .all()
         .all()
     ):
         raise LookaheadError("the set of decisions before the cutoff changed")
-    same = np.isclose(a["promised_h"], b["promised_h"], rtol=0, atol=0, equal_nan=True)
+    same = np.isclose(a["bound_h"], b["bound_h"], rtol=0, atol=0, equal_nan=True)
     if not same.all():
         first = a.loc[~same].iloc[0]
         raise LookaheadError(
-            f"{int((~same).sum())} of {len(a)} promises before the cutoff changed when only "
+            f"{int((~same).sum())} of {len(a)} bounds before the cutoff changed when only "
             f"the future changed; first: session {first.session_id} at {first.decision_time}"
         )
     return len(a)

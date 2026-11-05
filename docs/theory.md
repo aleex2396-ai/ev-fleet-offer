@@ -1,112 +1,190 @@
-# What the guarantees require
+# Theory: the statements the project reads against
 
-This note states the published guarantees behind the three headline rules exactly, with
-their theorem numbers, and sets each requirement against what the Caltech data provide.
-Numbers marked "computed" come from `src/staypromise/theory.py` and are printed by
-`staypromise requirements`.
+This note states the published results behind the design exactly, with their numbering, the
+one elementary proposition the project adds, and what each result requires set against what
+the data provide. Numbers marked *computed* come from `src/fleetoffer/calibrate.py`, are
+printed by `fleetoffer requirements`, and are checked in `tests/test_calibrate.py`.
 
-## The promise as a chance constraint
+Each paper's symbols are kept within its section. In particular α is the scaling factor of
+programme (24) in the first two sections, the share of discarded samples in the 2022
+theorem, and the target miss rate in Gibbs and Candès; γᵢ is a per-car translation in the
+2024 paper and γ the step size of adaptive conformal inference.
 
-A promise is a number of hours *x* for one plugged-in car, with the stay ξ (hours from plug-in
-to unplug) as the uncertain quantity. The promise is kept when x ≤ ξ, and should be kept with
-probability at least 1 − ε. Throughout, ε = 0.10: a 90% promise.
+## The per-car set
 
-## The drift-aware rule: Yan, Parise and Bitar (2022)
+The decision is made at t₀ = 10:00 for the horizon 10:00 to 20:00, in K = 40 steps of
+δ = 0.25 hours. For a car with deadline d (a number of steps, 0 ≤ d ≤ K), energy ceiling e
+(kWh after 10:00) and power cap c (kW), its set of charging profiles u = (u₁, …, u_K) is
 
-S. Yan, F. Parise and E. Bitar, "Data-Driven Approximations of Chance Constrained Programs in
-Nonstationary Environments", arXiv:2205.03748v1 (IEEE Control Systems Letters, 2022),
-Section III. The method is a robust sample approximation of a chance constraint, not
-distributionally robust optimisation; the paper's footnote 1 notes that applying the
-distributionally robust approach here "is likely overly conservative".
+U(d, e) = { u : 0 ≤ u_k ≤ c for k ≤ d;  u_k = 0 for k > d;  δ (u₁ + … + u_K) ≤ e }.
 
-**Assumptions.**
+Because u ≥ 0, the ceiling on the total also bounds the cumulative energy at every step. This
+is a charging-only special case of the generalised battery model of Al Taha, Vincent and
+Bitar (2024, equation (2)): no discharge, and an energy ceiling in place of the energy
+requirement of their equation (7). The zero profile lies in every U(d, e), so "the fleet can
+follow a profile" never means that each driver received the energy they needed.
 
-- The samples ξ₁, ξ₂, … are independent but not necessarily identically distributed.
-- Condition (9): the 1-Wasserstein distance between the distributions of samples *i* and
-  *i + k* is at most ρ(k), for **every** i ≥ 1 and k ≥ 0, where ρ is "a known function" with
-  ρ(0) = 0. Ages are counted in samples, not in calendar time.
-- For Theorem 4, the set of candidate decisions is finite (here: a grid of promise values).
+The **true set** of a car present at 10:00 uses its actual unplug time (20:00 if it is still
+plugged in then), rounded down to the 15-minute grid, and the energy it actually took
+between 10:00 and 20:00. A **learned set** uses a deadline no later than the car is predicted
+to leave (a lower quantile of remaining stay, rounded down to the grid) and an energy ceiling
+no higher than it is predicted to take (a lower quantile of remaining energy), with the same
+cap.
 
-**The method**, (10) to (12). Each past sample ξᵢ is replaced by a ball of radius rᵢ around
-it. A promise is admissible if it is kept for every point of the ball, for at least
-⌈(1 − α)N⌉ of the N samples, so at most ⌊αN⌋ samples may be discarded. For a promise with
-stays on [0, ∞), the ball constraint reads x ≤ max(ξᵢ − rᵢ, 0). The largest admissible
-promise is therefore the (⌊αN⌋ + 1)-th smallest of the widened-down stays max(ξᵢ − rᵢ, 0),
-rounded down to the grid. (This last step follows from (12); the paper does not write it for
-this constraint.)
+## Aggregation: Al Taha, Vincent and Bitar (2024)
 
-**Lemma 3.** For one sample, the chance that the ball constraint holds is at most the chance
-that the target constraint holds, plus ρ(N + 1 − i)/rᵢ. The proof goes through Markov's
-inequality.
+Al Taha, Vincent and Bitar, "An efficient method for quantifying the aggregate
+flexibility of plug-in electric vehicle populations", IEEE Transactions on Smart Grid 16(4),
+3142–3154, 2025 (online April 2024); arXiv 2207.07067.
 
-**Theorem 4.** The probability that the admissible set contains a promise that breaks the
-90% target for the next sample is at most |X| Ψ(αN; p₁, …, p_N), with
-pᵢ = (ε − ρ(N + 1 − i)/rᵢ)₊ and Ψ the distribution function of a sum of independent
-Bernoulli variables (Definition 2).
+- Each car's flexibility set is a polytope Uᵢ = {u : Hu ≤ hᵢ} (the generalised battery
+  model, equations (2)–(3)); the fleet's aggregate flexibility is the Minkowski sum Σ Uᵢ,
+  which is intractable to compute exactly in general.
+- **Theorem 2.** For a base set U₀ = {u : Hu ≤ h₀}, the set p + P U₀ lies inside Σ Uᵢ if there
+  exist γᵢ and Γᵢ (unrestricted) and Λᵢ ≥ 0 (entrywise) with [p, P] = Σ [γᵢ, Γᵢ]
+  (equation (20)), ΛᵢH = HΓᵢ (22) and Λᵢh₀ ≤ hᵢ − Hγᵢ (23). The conditions are sufficient
+  and, in the paper's own word, conservative. They are linear, so the inner approximation is
+  a linear programme: programme (24) for the structure-preserving case P = αI, with α
+  maximised.
+- **Section IV** allocates an aggregate profile u = p + Pu₀ to car i as uᵢ = γᵢ + Γᵢu₀
+  (equation (31)), an affine map obtained as a by-product of the programme, which the paper
+  presents as the way to avoid solving a disaggregation linear programme.
+- **Example 1** (equations (4)–(7)) builds a car's set with a power range (which may include
+  discharge), a capacity ceiling and a lower energy limit in force after the deadline, the
+  energy the driver requires (equation (7)). The sets above drop that requirement.
+- The paper's base set (equation (11)) is the average of the present cars' vectors; any
+  H-polytope base set is allowed. Here h₀ is fixed from the training period and is the same
+  for every arm (analysis plan, Section 3); the paper's choice is a sensitivity.
 
-**Remark 4 and Corollary 1.** With radii (14), rᵢ = ρ(N + 1 − i)/θ, every pᵢ equals ε − θ and
-Ψ becomes a binomial distribution function. Corollary 1 bounds it with Hoeffding's
-inequality: for δ in (0, 1), α in (0, ε) and θ in (0, ε − α),
-N ≥ ln(|X|/δ) / (2(ε − α − θ)²) gives confidence at least 1 − δ.
+## What this project adds: containment under one-sided bounds
 
-**What this means for a 90% promise** (computed; 95% confidence; promises on a 0 to 24 hour
-grid in steps of 1 hour, 25 candidates, or 15 minutes, 97 candidates):
+**Proposition.** If d′ ≤ d and e′ ≤ e, then U(d′, e′) ⊆ U(d, e).
 
-| Candidates | α | θ | Each ball is the drift budget times | Samples needed, Theorem 4 | Samples needed, Corollary 1 |
+*Proof.* Take u in U(d′, e′). For k ≤ d′, 0 ≤ u_k ≤ c. For d′ < k ≤ d, u_k = 0, which lies in
+[0, c]. For k > d ≥ d′, u_k = 0. And δ Σ u_k ≤ e′ ≤ e. So u is in U(d, e). ∎
+
+**Consequences.** Write E for the event that, on a given day, every present car's learned
+deadline is no later than its true one (both on the 15-minute grid, the learned one rounded
+down) and its learned energy ceiling is no higher than the energy it took, with the same cap
+in both sets. On E:
+
+1. Each learned set lies inside the car's true set, and Minkowski sums preserve inclusion, so
+   any inner approximation of the sum of learned sets lies inside the sum of true sets: every
+   offered profile can be split among the cars actually present.
+2. The Section IV allocation computed on the learned sets gives each car a profile in its
+   learned set, hence in its true set: the allocation fixed at 10:00 also delivers.
+
+By the union bound, Pr(E) ≥ 1 − (sum of the miss probabilities of the 2n bounds), with no
+assumption about independence between cars. Beyond that, how often E holds is an empirical
+quantity, measured by day. E is sufficient for delivery, not necessary.
+
+The inclusion fails for an **energy requirement** (a lower limit: a smaller predicted
+requirement gives a larger set, so containment would need an upper quantile) and for an
+**exact energy target** (no one-sided bound gives containment). The proposition is
+elementary; it is stated so that the project claims what the theorem gives and no more.
+
+## The exact band, for measuring the inner approximation's slack
+
+Cumulative energy by step t, C_t(u) = δ (u₁ + … + u_t), is linear in u. The maximum of a
+linear function over a Minkowski sum is the sum of its maxima over the summands, and its
+maximum over U(d, e) is min(e, c δ min(t, d)); its minimum is 0, at the zero profile. Each
+set is convex, so every value between is reached. The fleet's exact band of cumulative energy
+at step t is therefore
+
+[ 0,  Σᵢ min(eᵢ, c δ min(t, dᵢ)) ].
+
+For the offer p + αU₀ the band's width at step t is α (max over U₀ of C_t − min over U₀ of
+C_t): for a fixed base set, the width is α times a constant. The offer's width and the exact
+width are reported side by side at 14:00, 16:00 and 18:00, so the conservatism of the inner
+approximation is measured. The exact aggregate set for this class of sets, not only its band,
+is a generalised polymatroid (Mukhi, Loho and Abate, IEEE Transactions on Smart Grid 17(3),
+2026).
+
+## Day-level calibration under drift: Yan, Parise and Bitar (2022)
+
+Yan, Parise and Bitar, "Data-driven approximations of chance constrained programs in
+nonstationary environments", IEEE Control Systems Letters 6, 2022; arXiv 2205.03748,
+Section III.
+
+- **Assumptions.** Samples are independent, not necessarily identically distributed, and the
+  1-Wasserstein distance between the distributions of samples i and i + k is at most ρ(k),
+  for every i ≥ 1 and k ≥ 0, with ρ a known function and ρ(0) = 0 (condition (9)).
+- **Method** ((10)–(12)). Each past sample is replaced by a norm ball around it; a decision is
+  admissible if it satisfies the constraint on the whole ball for at least ⌈(1 − α)N⌉ of the
+  N samples. With the radii of **Remark 4**, rᵢ = ρ(N + 1 − i)/θ, each ball is the drift
+  budget at the sample's age divided by θ.
+- **Theorem 4.** For a finite decision set X, the probability that the robust sampled
+  solution set is not inside the true ε-feasible set is at most |X| · Ψ(αN; p₁, …, p_N), with
+  pᵢ = (ε − ρ(N + 1 − i)/rᵢ)₊ and Ψ the distribution function of a sum of independent
+  Bernoulli variables (Definition 2). With the radii of Remark 4, every pᵢ = ε − θ and Ψ is a
+  binomial distribution function.
+- **Corollary 1.** For δ in (0, 1), α in (0, ε) and θ in (0, ε − α),
+  N ≥ ln(|X|/δ) / (2(ε − α − θ)²) gives confidence at least 1 − δ. It follows from Theorem 4
+  through Hoeffding's inequality, so it is sufficient, not necessary.
+
+**With days as samples** (computed; ε = 0.10 for a 90%-of-days target, δ = 0.05, X a grid of
+101 scaling levels of the offer):
+
+| α | θ | Each ball is the drift budget times | Theorem 4 bound first at most δ | Theorem 4 bound at most δ for every N from | Corollary 1 |
 |---|---|---|---|---|---|
-| 25 | 0.02 | 0.040 | 25 | 253 | 1,943 |
-| 25 | 0.05 | 0.025 | 40 | 863 | 4,972 |
-| 25 | 0.05 | 0.040 | 25 | 4,542 | 31,074 |
-| 25 | 0.08 | 0.010 | 100 | 6,676 | 31,074 |
-| 97 | 0.02 | 0.040 | 25 | 311 | 2,366 |
-| 97 | 0.05 | 0.025 | 40 | 1,104 | 6,057 |
-| 97 | 0.05 | 0.040 | 25 | 5,862 | 37,853 |
-| 97 | 0.08 | 0.010 | 100 | 8,639 | 37,853 |
+| 0.02 | 0.040 | 25 | 285 days | 312 days | 2,379 days (7.6 times) |
+| 0.05 | 0.025 | 40 | 1,057 days | 1,121 days | 6,089 days (5.4 times) |
 
-"Samples needed, Theorem 4" is the smallest N from which Theorem 4's bound stays at or below
-δ (the bound is not monotone in N because αN is rounded down). Corollary 1 is a sufficient
-condition and asks for four to eight times more. The paper suggests no value for θ, α or δ.
+The bound is not monotone in N, because αN is rounded down; "for every N from" is the
+reading that does not depend on a lucky N. The paper suggests no value for θ, α or δ.
 
-Two consequences follow from the statements:
+## Adaptive conformal inference: Gibbs and Candès (2021)
 
-- **The balls are wide.** Because θ < ε − α ≤ ε, every ball is more than 1/ε = 10 times the
-  drift budget at that age, and 25 to 100 times in the settings above.
-- **A jump sets the budget at every age.** Condition (9) must hold for every starting sample.
-  If a change of size J can happen at any time, then ρ(k) ≥ J for every k ≥ 1, so every past
-  sample's ball is at least J/θ.
+Gibbs and Candès, "Adaptive conformal inference under distribution shift", NeurIPS
+2021; arXiv 2106.00170.
 
-## The drift-free rule: adaptive conformal inference (Gibbs and Candès, 2021)
+- **Update** (equation (2)): the working level moves as αₜ₊₁ = αₜ + γ(α − errₜ), where errₜ
+  is 1 when the outcome falls outside the prediction set.
+- **Proposition 4.1** (equation (5)): with probability one, for every T, the average miss
+  rate over T steps is within (max{α₁, 1 − α₁} + γ)/(γT) of the target α. The paper states
+  that this puts no constraints on the data-generating distribution.
+- **What it assumes:** the stated recursion with an initial level in [0, 1], a positive step,
+  a quantile rule extended to infinite endpoints, and each outcome known before the next
+  prediction.
 
-I. Gibbs and E. Candès, "Adaptive Conformal Inference Under Distribution Shift", NeurIPS 2021
-(arXiv:2106.00170).
+With days as steps the result certifies a long-run share of failed days, not a probability
+for each day. Computed: starting at α₁ = 0.10, over the 182 weekdays of 2021 the bound is
+within 5 points of 10% only if γ ≥ 0.9/8.1 ≈ 0.11; over 20 days no step reaches 5 points.
 
-- **Update**, equation (2): the working level moves as αₜ₊₁ = αₜ + γ(α − errₜ), where errₜ is 1
-  when the outcome falls outside the prediction set. For a promise, the set is the hours at or
-  above the promise; a working level at or below 0 gives a promise of 0 hours, which is always
-  kept.
-- **Guarantee**, Proposition 4.1, equation (5): with probability one, for every T, the
-  average miss rate over T steps is within (max{α₁, 1 − α₁} + γ)/(γT) of the target. The paper
-  states that it "puts no constraints on the data generating distribution".
-- **What it assumes**: a fixed step size γ (the experiments use 0.005), and each outcome
-  revealed before the next prediction. The paper's discussion lists delayed outcomes as an
-  open problem.
+## Robust aggregation: Mukhi, Qu, You and Abate (2025)
 
-## Choosing the drift budget from data: Keehan, Anderson and Wiesemann (2025)
+Mukhi, Qu, You and Abate, "Robust aggregation of electric vehicle flexibility",
+HSCC 2025; arXiv 2405.08232. The robust aggregate flexibility set at confidence 1 − β is the
+set of aggregate profiles that the realised fleet can satisfy with probability at least
+1 − β (Definition 2.3), under charging requirements drawn independently from one known
+distribution. Theorem 4.4 gives a generalised polymatroid contained in that set, built as the
+intersection of the aggregate sets of all populations within a Wasserstein ball that contains
+the realised population with probability at least 1 − β (Lemma 4.3 and Theorem 4.2). The
+paper names per-vehicle distributions as a limit of its independent-draws model. This
+project's target differs: the realised day, with the distribution unknown, changing, and
+sessions not independent, scored on nine profiles. It reports empirical delivery, and names
+this result as the one that would apply if its assumptions held.
 
-D. Keehan, E. Anderson and W. Wiesemann, arXiv:2510.18566 (v2, December 2025). Their drift is
-measured in the ∞-Wasserstein distance, a stronger requirement than condition (9). Section 2
-assumes the drift bound ρ is known, and states that in applications "one selects the value
-of ρ that best fits the data via cross-validation". Their guarantees treat ρ and the weights
-as fixed; none covers a value chosen from the data.
+## What each day-level rule gives
 
-## Requirements against the data
-
-| The guarantee's requirement | What Caltech provides | Status |
+| Rule | What it gives | Under which assumption |
 |---|---|---|
-| Independent samples (both papers) | Cars on one day share the day's events and the app; the same drivers return | To be tested by the fleet-level check (each rule's promises summed per day) |
-| A known drift budget for every pair of samples (condition 9) | A budget must be estimated; the 2020 closure is a jump of several hours in typical stay | Not given by the data; at most within an era |
-| Enough samples (Theorem 4) | 15 to 45 sessions a week from November 2020, about 100 to 140 by summer 2021 (`fingerprints/caltech.csv`) | About 250 to 1,100 samples in the moderate settings above: weeks to months, not years |
-| Balls of 25 to 100 times the drift budget (Lemma 3, Remark 4) | Typical stays of one to two hours after the reopening | A sample whose budget exceeds 0.02 to 0.07 hours is widened past a typical stay; to be measured on data from before March 2020 |
-| Complete samples | At decision time, recent stays are still in progress | To be handled in the analysis plan |
-| Each outcome known before the next promise (adaptive conformal) | A stay is known only when the car leaves | To be handled in the analysis plan |
-| A drift budget that is known, not chosen from data (both drift papers) | It must be chosen from data | Not covered by either guarantee |
+| Union bound across the 2n per-car bounds, each at level 0.10/(2n) (0.00125 with 40 cars, computed) | Delivery on at least 90% of days, for each day | Every per-car bound valid at its level, given what is known at 10:00 |
+| Adaptive conformal inference, days as steps | A long-run share of failed days within (max{α₁, 1 − α₁} + γ)/(γT) of 10% | None on the data; the day's outcome known before the next decision |
+| Split conformal rule on a window of past day scores | At least 90% for the next day | Exchangeable days |
+| Theorem 4 of Yan, Parise and Bitar, days as samples | At most δ chance that the kept decisions break the 90% target | Independent days, a known drift bound ρ on whole-day configurations, a fixed finite decision set, and the day counts above |
+
+## The requirements against the data
+
+| Requirement | What the data provide | Status |
+|---|---|---|
+| Independent days (2022 theorem; also the reading of a long-run share) | Cars on one day share the day's events, prices and calendar; drivers return | Not given; cars on one day are not treated as independent, and uncertainty is resampled by whole weeks |
+| A known drift bound ρ on whole-day configurations (condition (9)) | A day is a varying number of cars, each with a deadline and an energy; the 2020 closure is a jump no earlier data can measure | Not given; a norm on that space would itself be a choice |
+| Enough days (Theorem 4) | 483 weekdays in development (computed), so 312 is met and 1,121 missed by 638; a calendar year has 261 weekdays (computed), about 250 once holidays are removed; 182 in 2021 (computed) | Met at the first setting on development data only |
+| A fixed finite decision set (Theorem 4) | The offer is fitted continuously from the day's cars | Not met; a grid of 101 scales is the closest reading |
+| Exchangeable days (split conformal) | The closure and the 2021 reopening break exchangeability | Its 90% is an empirical target across the change |
+| Each outcome known before the next decision (adaptive conformal) | A day's outcome is defined within the horizon, so it is known by 20:00 | Met by construction |
+
+So the day-level rate in this project rests on a calibration rule over past days or on a
+union bound across cars; the requirements of the 2022 theorem are reported beside the days
+available, and no certificate from it is claimed.

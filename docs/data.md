@@ -11,15 +11,27 @@ Two sites are used:
 
 | Site | Role in this project | Months in the API |
 |---|---|---|
-| Caltech campus car park | development (before March 2020) and main test (after the 2020 closure) | April 2018 to September 2021 |
+| Caltech campus car park | development (before March 2020) and main test (from 1 March 2020) | April 2018 to September 2021 |
 | Jet Propulsion Laboratory (JPL) | replication, analysed once after the settings are frozen | September 2018 to September 2021 |
+
+Caltech's development period, 25 April 2018 to 29 February 2020, is split in time order
+(analysis plan, Section 7):
+
+| Block | Dates | Used for |
+|---|---|---|
+| Training | 25 April 2018 to 30 April 2019 | fitting models; the base set of the offer |
+| Model selection | May to August 2019 | choosing settings, which are then frozen; warming up the day-level calibration |
+| Frozen development evaluation | September 2019 to February 2020 | hypotheses H1 and H4, with nothing chosen on it |
+
+The period contains a real change that is not sealed: charging became paid for sessions
+linked to a driver on 1 November 2018 (Lee, Li and Low, 2019).
 
 The third site in the API (an office car park, `office001`) has too few drivers to carry a
 claim and is not used.
 
 ## Download
 
-`staypromise fetch <site>` asks the API for one calendar month at a time: every session whose
+`fleetoffer fetch <site>` asks the API for one calendar month at a time: every session whose
 plug-in time falls in that month in UTC, start included, end excluded, 100 sessions a page. A
 month is accepted only if the number of sessions received equals the total the server
 reports and no session appears twice; otherwise it is asked for again. Each month is stored
@@ -27,7 +39,7 @@ as canonical JSON (sessions sorted by their database ID, keys sorted, no whitesp
 gzip-compressed, under `data/raw/<site>/`.
 
 The SHA-256 of each month's canonical JSON is committed in `fingerprints/<site>.csv`, with
-the session count. `staypromise verify <site>` recomputes them, so anyone with a token can
+the session count. `fleetoffer verify <site>` recomputes them, so anyone with a token can
 confirm they hold exactly the data analysed here.
 
 | Site | Sessions | First and last plug-in (Pacific time) | Months with no sessions |
@@ -61,8 +73,8 @@ Cleaning drops only records that cannot be a charging session, in this order, an
 2. `not_positive`: the car unplugs at or before it plugs in.
 3. `duplicate`: a session ID already seen; the first is kept.
 
-Nothing is dropped for being unusual: very short and very long stays stay in, because a
-promise rule meets them in practice.
+Nothing is dropped for being unusual: very short and very long stays stay in, because an
+offer made at 10:00 meets them in practice.
 
 Caltech: of 31,424 records, none was dropped by any of the three rules (counted before the
 test-period seal was added; before 1 March 2020, 27,584 records, none dropped). JPL's counts
@@ -85,7 +97,28 @@ are never used as the true departure. `data.session_flags` adds descriptive flag
 | `typed_60`, `typed_480` | the first entry stated exactly one hour, or exactly eight hours |
 | `edits` | how many times the entry was changed afterwards |
 
-They describe how the data were recorded; none is used to drop sessions.
+They describe how the data were recorded; none is used to drop sessions. As inputs at
+10:00, a typed entry is used only if it was recorded before 10:00, and a session counts as
+linked to a driver only if the link was recorded before 10:00; the final `claimed` flag and
+the number of `edits` are never used as inputs (analysis plan, Section 7). Typed stays of
+exactly 60 and 480 minutes are flagged because they may be app defaults; no dated source
+says so, and they are not called defaults here.
+
+## Per-session time series
+
+The energy a car takes after 10:00, and the pilot signal the charging network sent it, are
+not fields of the session record. They come from the API's time-series endpoint, one session
+per request: the charging current and the pilot signal at the network's sampling times.
+Energy after a time is the current integrated from that time on, at the station's voltage.
+The pilot signal is the network's own current limit sent to the car, not a capability of the
+vehicle, and is never used as an input at 10:00.
+
+Check D1 of the analysis plan decides whether the series can be used: on a seeded sample of
+300 development sessions, at least 95% must have a usable current series, and the integrated
+energy must match the session's recorded kWh with a median absolute error of at most 5%. Its
+result, the coverage by month, and the rule for sessions without a usable series are reported
+here once the check has run. The series are stored and fingerprinted like the session
+months.
 
 ## Check against an independent public copy
 
@@ -93,7 +126,7 @@ SustainGym (Yeh et al., NeurIPS 2023 Datasets and Benchmarks Track) publishes fo
 of the Caltech site under CC-BY-4.0, made from the same API by other people. The files used
 here are pinned to commit `eac2a4d5ce4ccf44b13c290edac72532c68e30f5` of
 [chrisyeh96/sustaingym](https://github.com/chrisyeh96/sustaingym) and checked by SHA-256
-before use (`snapshots.py`). `staypromise snapshot-check <folder>` compares each extract with
+before use (`acn.py`). `fleetoffer snapshot-check <folder>` compares each extract with
 the download over the same Pacific-time days:
 
 | Extract | Sessions in extract | Sessions here | In both | Plug-in and unplug times equal (to 1 s) | Driver-link flag equal |

@@ -1,7 +1,7 @@
 [project]
-name = "staypromise"
+name = "fleetoffer"
 version = "0.1.0.dev0"
-description = "Reliable lower bounds on EV dwell time when driver behaviour changes: a reproducible study on open charging data."
+description = "A fleet charging offer from learned per-car bounds, calibrated by day and scored by replayed delivery, on open EV charging data."
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
@@ -14,7 +14,7 @@ dependencies = [
 ]
 
 [project.scripts]
-staypromise = "staypromise.cli:main"
+fleetoffer = "fleetoffer.pipeline:main"
 
 [dependency-groups]
 dev = [

@@ -1,7 +1,7 @@
 """Made-up charging sessions with behaviour that is known exactly.
 
-Used to check the pipeline, and later to check that each method finds a change when one is
-there. Nothing here is a model of any real site.
+Used to check every method where the answer is known, before any real data are spent.
+Nothing here is a model of any real site.
 
 Behaviour is a sequence of regimes. Within a regime, cars arrive on each day in a Poisson
 number (fewer at weekends), mostly in a morning peak, and stay for a log-normal number of

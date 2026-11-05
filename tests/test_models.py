@@ -3,7 +3,7 @@ import math
 import numpy as np
 import pytest
 
-from staypromise.survival import km_curve, lower_quantile
+from fleetoffer.models import km_curve, lower_quantile
 
 
 def test_kaplan_meier_by_hand():
@@ -18,13 +18,13 @@ def test_kaplan_meier_by_hand():
 @pytest.mark.parametrize("level", [0.05, 0.1, 0.2])
 def test_without_censoring_it_is_the_usual_lower_quantile(n, level):
     stays = np.random.default_rng(n).lognormal(1.0, 0.6, n)
-    promise = lower_quantile(*km_curve(stays, np.ones(n, bool)), level)
-    # The largest promise broken by at most a `level` share of the sample.
-    assert promise == np.sort(stays)[math.floor(level * n + 1e-9)]
-    assert np.mean(stays < promise) <= level
+    bound = lower_quantile(*km_curve(stays, np.ones(n, bool)), level)
+    # The largest bound that fails for at most a `level` share of the sample.
+    assert bound == np.sort(stays)[math.floor(level * n + 1e-9)]
+    assert np.mean(stays < bound) <= level
 
 
-def test_a_car_already_plugged_in_gets_a_conditional_promise():
+def test_a_car_already_plugged_in_gets_a_conditional_bound():
     stays = np.arange(1.0, 11.0)  # 1, 2, ..., 10 hours, all ended
     curve = km_curve(stays, np.ones(10, bool))
     # Among stays of at least 3.5 h (4..10), staying at least 0.5 h more fails 0 of 7 times;

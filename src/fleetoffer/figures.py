@@ -33,11 +33,11 @@ def plot_monthly(
     rules: list[str],
     title: str,
     note: str | None = None,
-    min_offered: int = 20,
+    min_given: int = 20,
 ) -> Path:
-    """Two stacked panels sharing the time axis: share of promises kept, and hours promised.
+    """Two stacked panels sharing the time axis: share of bounds that held, and hours bounded.
 
-    Months with fewer than `min_offered` promises are left blank rather than drawn from a
+    Months with fewer than `min_given` bounds are left blank rather than drawn from a
     handful of cars.
     """
     if len(rules) > len(SERIES):
@@ -53,10 +53,10 @@ def plot_monthly(
     for k, rule in enumerate(rules):
         m = monthly[monthly["rule"] == rule].sort_values("month")
         x = m["month"].dt.to_timestamp() + pd.Timedelta(days=14)
-        enough = m["offered"] >= min_offered
+        enough = m["given"] >= min_given
         for ax, y in (
-            (top, (100 * m["kept_share"]).where(enough)),
-            (bottom, m["mean_promised_h"].where(enough)),
+            (top, (100 * m["held_share"]).where(enough)),
+            (bottom, m["mean_bound_h"].where(enough)),
         ):
             ax.plot(
                 x, y, color=SERIES[k], lw=1.6, solid_capstyle="round", label=rule, path_effects=halo
@@ -76,9 +76,9 @@ def plot_monthly(
         color=INK_2,
         fontsize=8,
     )
-    top.set_ylabel("promises kept (%)", color=INK_2, fontsize=9)
+    top.set_ylabel("bounds that held (%)", color=INK_2, fontsize=9)
     top.set_ylim(0, 100)
-    bottom.set_ylabel("hours promised\n(mean per car)", color=INK_2, fontsize=9)
+    bottom.set_ylabel("hours bounded\n(mean per car)", color=INK_2, fontsize=9)
     bottom.set_ylim(bottom=0)
     for ax in (top, bottom):
         _quiet_axes(ax)

@@ -2,8 +2,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from staypromise.sessions import validate_sessions
-from staypromise.synthetic import Regime, make_sessions
+from fleetoffer.data import validate_sessions
+from fleetoffer.synthetic import Regime, make_sessions
 
 REGIMES = [
     Regime("2001-01-01", sessions_per_weekday=40, median_stay_h=6.0, stay_spread=0.5),

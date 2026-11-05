@@ -32,6 +32,8 @@ May to August 2021. What was learned:
 
 - the closure itself (24 sessions in April 2020, none in September and October 2020), median
   stays of about 1 to 2 hours afterwards, and departures 4 to 6 hours earlier than typed;
+- the median stay in May to August 2021 against May to August 2019 (1.68 against 6.05 hours),
+  and the number of sessions per day in 2021, about half the 2019 level;
 - 26% to 36% of typed stays were exactly 8 hours in 2021, and typed entries were recorded at
   the plug-in rather than after it;
 - a lower bound fitted before the closure and never updated held in 37% to 87% of sessions
@@ -67,19 +69,32 @@ learned:
 Counts only, and one month checked for driver IDs (none). It has no sessions before March
 2019.
 
+## Counts whose period was not recorded
+
+An earlier summary gave the share of Caltech sessions linked to a registered driver (47%) and
+the share with a typed plan recorded within ten minutes of the plug-in (46%). Its period and
+exact definitions were not recorded. Both are recomputed in this repository with stated
+definitions (analysis plan, Section 10a), and the earlier figures are not used.
+
 ## Not looked at
 
-At neither site has any rule with an online correction from its own record of kept and
-broken promises (adaptive conformal inference) been run, nor the drift-aware rule of Yan,
-Parise and Bitar with its drift allowance estimated from the data as it arrives (it was run
-at Caltech only with fixed drift values, as listed above). The hours committed by adaptive
-conformal and by the drift-aware rule with an estimated allowance, how fast each of the
-three headline rules recovers after the closure, and the fleet-level comparison across rules
-have not been measured at either site.
+The looks above concern stays, typed plans and session counts. None is recorded as computing
+a statistic of the energy cars took (the reading of 192 raw sessions below showed each one's
+recorded kWh), and the per-session time series (charging current and pilot signal) had not
+been downloaded for any period. At neither site has any of this
+project's quantities been computed: no learned per-car bound, no per-car flexibility set, no
+offer from the inner approximation, no delivery check, no day-level calibration rule and no
+comparison of learned against population bounds. No rule with an online correction from its
+own record of held and failed bounds (adaptive conformal inference) has been run at either
+site, nor the drift-aware rule of Yan, Parise and Bitar with its drift allowance estimated
+from the data as it arrives (it was run at Caltech only with fixed drift values, as listed
+above).
 
 ## Looks made as part of this repository
 
 - Downloads of both sites with session counts and fingerprints (`docs/data.md`).
 - A comparison of the Caltech download with the SustainGym extracts (`docs/data.md`).
 - A reading of 192 raw Caltech sessions picked at random (fixed seed), from before March
-  2020 and from 2021, without computing statistics.
+  2020 and from 2021, including three drivers followed over 20 visits in each period: for each
+  session its plug-in and unplug times, stay, recorded kWh, driver link and typed plan, read
+  without computing statistics.
