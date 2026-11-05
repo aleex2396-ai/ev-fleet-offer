@@ -269,12 +269,20 @@ class FleetResult:
     cars: pd.DataFrame  # one row per car present at a decision
 
 
-def _view(table: pd.DataFrame, t: pd.Timestamp, present: np.ndarray, ended: np.ndarray):
+def _view(
+    table: pd.DataFrame,
+    t: pd.Timestamp,
+    present: np.ndarray,
+    ended: np.ndarray,
+    entries: pd.DataFrame | None = None,
+):
     def linked(rows: pd.DataFrame) -> pd.Series:
         if "linked_time" not in rows.columns:
             return pd.Series(None, index=rows.index, dtype=object)
-        known = rows["linked_time"].notna() & (rows["linked_time"] < t)
-        return rows["user_id"].where(known, None).astype(object)
+        known = (rows["linked_time"].notna() & (rows["linked_time"] < t)).to_numpy()
+        users = rows["user_id"].to_numpy(object)
+        shown = [u if k and isinstance(u, str) else None for u, k in zip(users, known, strict=True)]
+        return pd.Series(shown, index=rows.index, dtype=object)
 
     now = table.loc[present, [c for c in _KNOWN_ON_ARRIVAL if c in table.columns]].copy()
     now["user_id"] = linked(table.loc[present])
@@ -283,7 +291,12 @@ def _view(table: pd.DataFrame, t: pd.Timestamp, present: np.ndarray, ended: np.n
     past["user_id"] = linked(past)
     if "linked_time" in past.columns:
         past["linked_time"] = past["linked_time"].where(past["linked_time"] < t)
-    return DayView(t, now.reset_index(drop=True), past.reset_index(drop=True))
+    if entries is None:
+        typed = pd.DataFrame()
+    else:
+        typed = entries.iloc[: int(entries["modified_at"].searchsorted(t, side="left"))]
+        typed = typed.reset_index(drop=True)
+    return DayView(t, now.reset_index(drop=True), past.reset_index(drop=True), typed)
 
 
 def _steps(hours: np.ndarray, step_h: float, steps: int) -> np.ndarray:
@@ -350,6 +363,8 @@ def fleet_replay(
     daily: Daily = MORNING,
     base: BaseSet | None = None,
     method: str = "programme",
+    entries: pd.DataFrame | None = None,
+    until: pd.Timestamp | None = None,
     cap: float = CAP_KW,
     steps: int = STEPS,
     step_h: float = STEP_H,
@@ -357,18 +372,23 @@ def fleet_replay(
     """Run one fleet rule over the decision days and score each day's offer.
 
     Each decision day, in time order: earlier days' outcomes known by now are passed to the
-    rule; the rule gives per-car bounds from what is known at the decision time; the learned
+    rule; the rule gives per-car bounds from what is known at the decision time, including
+    the app entries recorded by then (`entries`, as made by `data.app_entries`); the learned
     sets give the offer (programme (24) on the fixed base set `base`, or on the average of the
     day's learned sets if `base` is None, the paper's own choice; or the one-dimensional
-    fallback if `method` is "segment"); the offer is checked against the true sets. A day's
-    outcome is passed to the rule once every input to it is known (`DayOutcome`).
+    fallback if `method` is "segment"); the offer is checked against the true sets. With
+    `method` "bounds" no offer is made and only the per-car bounds are scored (the per-car
+    layer). A day's outcome is passed to the rule once every input to it is known
+    (`DayOutcome`). Decisions stop before `until`, if given.
     """
-    if method not in ("programme", "segment"):
-        raise ValueError("method must be 'programme' or 'segment'")
+    if method not in ("programme", "segment", "bounds"):
+        raise ValueError("method must be 'programme', 'segment' or 'bounds'")
     table = validate_sessions(sessions)
     for col in ("kwh_delivered", "done_charging_time"):
         if col not in table.columns:
             raise ValueError(f"the day level needs the column {col}")
+    if entries is not None:
+        entries = entries.sort_values("modified_at", kind="stable").reset_index(drop=True)
     connect_h, disconnect_h = to_hours(table["connect_time"]), to_hours(table["disconnect_time"])
     horizon_h = steps * step_h
     pending: list[tuple[float, int, DayOutcome]] = []
@@ -376,6 +396,8 @@ def fleet_replay(
     day_rows, car_rows = [], []
 
     times = daily.times_h(float(connect_h.min()), float(disconnect_h.max())) if len(table) else []
+    if until is not None:
+        times = [t for t in times if t < timestamp_to_hours(until)]
     for t in times:
         while pending and pending[0][0] < t:
             rule.observe(heapq.heappop(pending)[2])
@@ -388,7 +410,7 @@ def fleet_replay(
         if isinstance(rule, Oracle):
             learned = true
         else:
-            view = _view(table, when, present, np.flatnonzero(disconnect_h < t))
+            view = _view(table, when, present, np.flatnonzero(disconnect_h < t), entries)
             stay_h, energy = (np.asarray(b, dtype=float) for b in rule.bounds(view))
             if stay_h.shape != (len(present),) or energy.shape != (len(present),):
                 raise ValueError(f"{rule.name} must give one stay and one energy bound per car")
@@ -400,13 +422,15 @@ def fleet_replay(
                 _steps(np.minimum(stay_h, horizon_h), step_h, steps), energy, cap, steps, step_h
             )
 
+        offer = None
         if method == "segment":
             offer = solve_segment(learned)
             alpha, digest = np.nan, _digest(offer.amplitude, offer.b, offer.w)
-        else:
+        elif method == "programme":
             offer = solve(learned, base if base is not None else BaseSet.average(learned))
             alpha, digest = offer.alpha, offer.digest()
-        delivery = check_delivery(offer, true)
+        else:
+            alpha, digest = np.nan, _digest(learned.deadline, learned.energy)
         deadline_held = learned.deadline <= true.deadline
         energy_held = learned.energy <= true.energy + _ENERGY_TOL_KWH
         revealed = max(t + horizon_h, float(disconnect_h[present].max()))
@@ -414,27 +438,30 @@ def fleet_replay(
             when + pd.Timedelta(hours=horizon_h), table["disconnect_time"].iloc[present].max()
         )
         sizes = SIZE_CHECKPOINTS
-        day_rows.append(
-            {
-                "rule": rule.name,
-                "decision_time": when,
-                "cars": len(present),
-                "method": method,
-                "alpha": alpha,
+        row = {
+            "rule": rule.name,
+            "decision_time": when,
+            "cars": len(present),
+            "method": method,
+            "alpha": alpha,
+            "exact_true_kwh": float(np.mean([true.band_width(k) for k in sizes])),
+            "exact_learned_kwh": float(np.mean([learned.band_width(k) for k in sizes])),
+            "all_bounds_held": bool(deadline_held.all() and energy_held.all()),
+            "revealed_at": revealed_at,
+            "digest": digest,
+        }
+        if offer is not None:
+            delivery = check_delivery(offer, true)
+            row |= {
                 "size_kwh": offer.size(),
-                "exact_true_kwh": float(np.mean([true.band_width(k) for k in sizes])),
-                "exact_learned_kwh": float(np.mean([learned.band_width(k) for k in sizes])),
-                "all_bounds_held": bool(deadline_held.all() and energy_held.all()),
                 "fixed_delivered": delivery.fixed_delivered,
                 "fixed_shortfall_kwh": max(delivery.fixed_kwh.values()),
                 "hindsight_delivered": delivery.hindsight_delivered,
                 "hindsight_shortfall_kwh": max(delivery.hindsight_kwh.values()),
                 "profile_energy_kwh": float(np.mean(list(delivery.energy_kwh.values()))),
                 "solve_seconds": offer.seconds,
-                "revealed_at": revealed_at,
-                "digest": digest,
             }
-        )
+        day_rows.append(row)
         ids = table["session_id"].to_numpy()[present]
         car_rows.append(
             pd.DataFrame(

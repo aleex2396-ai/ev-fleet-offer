@@ -266,12 +266,55 @@ def session_flags(sessions: pd.DataFrame, inputs: pd.DataFrame) -> pd.DataFrame:
     )
 
 
+ENTRY_COLUMNS = (
+    "session_id",
+    "entry",
+    "modified_at",
+    "minutes_available",
+    "requested_departure",
+    "kwh_requested",
+)
+
+
+def app_entries(inputs: pd.DataFrame) -> pd.DataFrame:
+    """The app entries a rule may see once recorded: one row per entry, by entry time."""
+    out = inputs.loc[inputs["modified_at"].notna(), list(ENTRY_COLUMNS)].copy()
+    out["session_id"] = out["session_id"].astype(str)
+    return out.sort_values(["modified_at", "session_id", "entry"], kind="stable").reset_index(
+        drop=True
+    )
+
+
+def driver_links(sessions: pd.DataFrame, inputs: pd.DataFrame) -> pd.DataFrame:
+    """The table with ``linked_time``: when the session was tied to its driver.
+
+    A session gets a driver identifier when the driver claims it in the app, which records
+    an entry; the link is dated by the session's first entry. A session with a driver
+    identifier but no dated entry gets no link time and so counts as anonymous at every
+    decision.
+    """
+    first = (
+        inputs[inputs["modified_at"].notna()]
+        .sort_values(["session_id", "modified_at", "entry"])
+        .drop_duplicates("session_id", keep="first")
+        .set_index("session_id")["modified_at"]
+    )
+    out = sessions.copy()
+    linked = out["session_id"].map(first)
+    out["linked_time"] = linked.where(out["user_id"].notna())
+    return out
+
+
 def stored_months(data_root: Path, site: str) -> list[str]:
     folder = Path(data_root) / "raw" / site
     return sorted(p.name.removesuffix(".json.gz") for p in folder.glob("*.json.gz"))
 
 
-def load_items(data_root: Path, site: str, *, unseal: bool = False) -> list[dict]:
+def load_items(
+    data_root: Path, site: str, *, unseal: bool = False, before: pd.Timestamp | None = None
+) -> list[dict]:
+    """Stored session records of one site, within its seals; with `before`, stored months
+    that start at or after it are not opened."""
     if site in SEALED_SITES and not unseal:
         raise SealedSiteError(
             f"{site} is the sealed replication site; it is analysed once, after the settings "
@@ -288,6 +331,8 @@ def load_items(data_root: Path, site: str, *, unseal: bool = False) -> list[dict
     for month in stored_months(data_root, site):
         first = pd.Timestamp(f"{month}-01", tz="UTC")
         if sealed and first >= start:
+            continue
+        if before is not None and first >= before:
             continue
         month_items = read_month(data_root, site, month)
         if sealed and first + pd.DateOffset(months=1) > start:

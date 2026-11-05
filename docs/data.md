@@ -104,6 +104,41 @@ the number of `edits` are never used as inputs (analysis plan, Section 7). Typed
 exactly 60 and 480 minutes are flagged because they may be app defaults; no dated source
 says so, and they are not called defaults here.
 
+**When a session counts as linked, and which plan is used.** A session receives a driver
+identifier when the driver claims it in the app, which records an entry. The link is dated
+by the session's first entry (`data.driver_links`, column `linked_time`); a session with a
+driver identifier but no dated entry would count as anonymous at every decision. At 10:00 the
+engine shows a car's driver only if `linked_time` is before 10:00, and shows the app entries
+recorded before 10:00 (`data.app_entries`); the plan used is the latest of those. Among the
+22,738 Caltech sessions plugged in before 1 September 2019, every one of the 8,934 with a
+driver identifier has a dated entry; the first entry came a median of 0.4 minutes after
+plug-in, within 20 minutes for 99% of them, and at most 6.2 days later. Of the 4,011 car-days
+at 10:00 in that period with an entry recorded before 10:00, 293 had more than one, and on
+204 the latest differed from the first. Every session with a driver identifier has an app
+entry, and no session without one has any, so at 10:00 a car counts as linked exactly when it
+has a plan recorded before 10:00: on all 9,148 car-days at 10:00 up to August 2019 the two
+inputs agree. Driver history and a typed plan therefore always come together, and the
+comparison of known and anonymous cars (check D6) is also a comparison of cars with and
+without a typed plan.
+
+## Academic calendar and holidays
+
+Inputs at 10:00 include three day flags (`academic.day_flags`): instruction in session (from
+the beginning of instruction to the end of a term, study periods and final examinations
+included), summer (between the end of the third term and the next beginning of instruction),
+and Institute holiday. Days that are neither are the winter and spring recesses. Terms, and
+the holidays they name (Thanksgiving and the day after, Martin Luther King Day, Presidents'
+Day, Memorial Day), come from the Office of the Registrar's academic calendars for 2017-18 to
+2021-22 (registrar.caltech.edu, documents 7450, 7449, 17372, 7212 and 7213). Independence Day,
+Labor Day and the year-end closure come from Caltech's events calendar, which lists
+Independence Day on 4-5 July 2019, 3 July 2020 and 5 July 2021, Labor Day on 2 September 2019
+and 7 September 2020, and Institute holidays from 24 December to 1 January for 2018-19 and
+2020-21. Where no entry was found (Independence Day 2018, Labor Day 2018 and 2021, the
+closures of 2019-20 and 2021-22) the federal date and 24 December to 1 January are used. The
+sources were read on 5 November 2026. The calendar covers January 2018 to June 2022 and refuses
+other dates. The same flags are given at JPL, whose own schedule (including any alternate
+Fridays off) is not modelled.
+
 ## Per-session time series
 
 The energy a car takes after 10:00, and the pilot signal the charging network sent it, are

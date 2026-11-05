@@ -42,6 +42,7 @@ Session data come from [Caltech ACN-Data](https://ev.caltech.edu/dataset), avail
 ```bash
 uv run fleetoffer fetch caltech    # stored under data/, never committed
 uv run fleetoffer verify caltech   # same data as this repository's fingerprints/caltech.csv?
+uv run fleetoffer percar           # per-car models and baselines, months through August 2019
 ```
 
 The energy delivered after 10:00 is not a field of the session record. The per-session time series that would give it failed a quality check fixed before it was fetched (300 sampled sessions: 85% usable against a 95% threshold, median energy error 5.1% against 5%), so it is estimated from each session's recorded energy and charging-done time, and the energy ceiling is approximate. `docs/data.md` describes what is downloaded, the cleaning rules and their counts, the time-series check and the estimate, the sealed periods, and a check of the download against an independent public copy. If you use the data, cite Lee, Li and Low (2019).
@@ -60,8 +61,14 @@ src/fleetoffer/
   data.py         sessions table, cleaning rules, seals
   interface.py    what a model may see at the decision time
   engine.py       replay per car and per day; the only reader of unplug times
+  academic.py     Caltech's academic calendar and Institute holidays, as day flags
   features.py     inputs known at 10:00, from sessions that had ended
-  models.py       quantile models and baselines
+  quantiles.py    per-car quantile models (boosted trees, a small network, linear) and their
+                  monthly refits inside the engine
+  baselines.py    population rule, stratified table, each driver's own past, the mixture
+                  predictor of Lee, Li and Low, the typed plan
+  models.py       Kaplan-Meier quantiles and the earlier per-car stay rules
+  percar.py       the per-car layer on development months: settings search, refits, scores
   offer.py        per-car sets, the inner-approximation programme, the affine allocation,
                   the nine-profile delivery checks and the one-dimensional fallback
   calibrate.py    union bound, day-level conformal, adaptive conformal

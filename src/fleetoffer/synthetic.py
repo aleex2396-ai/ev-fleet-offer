@@ -110,6 +110,49 @@ def _add_energy(table: pd.DataFrame, rng: np.random.Generator) -> pd.DataFrame:
     return table
 
 
+def with_app_entries(
+    table: pd.DataFrame, *, seed: int = 0, share: float = 0.5
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """A copy of the table in which a `share` of sessions are claimed in the app, and their
+    entries (in the form of `data.app_entries`).
+
+    A claimed session's first entry comes a few minutes to a few hours after plug-in and
+    states the true stay, rounded to 15 minutes, with noise, or one hour; a third of claimed
+    sessions edit the plan once, an hour later. Unclaimed sessions lose their driver.
+    """
+    rng = np.random.default_rng([seed, 3])
+    out = table.copy()
+    claimed = rng.random(len(out)) < share
+    out["user_id"] = out["user_id"].where(claimed, None).astype(object)
+    rows = out[claimed]
+    n = len(rows)
+    lag = pd.to_timedelta(np.where(rng.random(n) < 0.7, 0.01, rng.uniform(0.1, 3.0, n)), unit="h")
+    stay = (rows["disconnect_time"] - rows["connect_time"]) / pd.Timedelta(minutes=1)
+    typed = np.round(stay.to_numpy() * rng.lognormal(0.0, 0.2, n) / 15.0) * 15.0
+    typed = np.where(rng.random(n) < 0.2, 60.0, np.maximum(typed, 15.0))
+    first = pd.DataFrame(
+        {
+            "session_id": rows["session_id"].to_numpy(),
+            "entry": 0,
+            "modified_at": (rows["connect_time"] + lag).to_numpy(),
+            "minutes_available": typed,
+            "requested_departure": (
+                rows["connect_time"] + pd.to_timedelta(typed, unit="m")
+            ).to_numpy(),
+            "kwh_requested": rows["kwh_delivered"].to_numpy() * rng.lognormal(0.0, 0.3, n),
+        }
+    )
+    edit = first[rng.random(n) < 1 / 3].copy()
+    edit["entry"] = 1
+    edit["modified_at"] = edit["modified_at"] + pd.Timedelta(hours=1)
+    edit["minutes_available"] = edit["minutes_available"] + 60.0
+    edit["requested_departure"] = edit["requested_departure"] + pd.Timedelta(hours=1)
+    entries = pd.concat([first, edit], ignore_index=True)
+    out["linked_time"] = out["session_id"].map(first.set_index("session_id")["modified_at"])
+    entries = entries.sort_values(["modified_at", "session_id", "entry"], kind="stable")
+    return out, entries.reset_index(drop=True)
+
+
 def _arrival_hours(rng: np.random.Generator, n: int) -> np.ndarray:
     """Hour of day: three in four arrive in a morning peak, the rest spread over the day."""
     morning = rng.random(n) < 0.75

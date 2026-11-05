@@ -22,7 +22,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from fleetoffer import __version__, acn, calibrate, data, offer
+from fleetoffer import __version__, acn, calibrate, data, offer, percar
 from fleetoffer.engine import Daily, Oracle, energy_in_window, fleet_replay, replay
 from fleetoffer.figures import plot_monthly
 from fleetoffer.models import FrozenQuantile, RollingQuantile
@@ -369,6 +369,77 @@ def run_d1(data_root: Path, out: Path) -> dict:
     return summary
 
 
+FIGURE_ONE_RULES = {"gbdt": "learned (trees)", "population": "population"}
+
+
+def run_percar(data_root: Path, out: Path) -> dict:
+    """The per-car layer on Caltech's months through August 2019 (`percar`)."""
+    out = Path(out)
+    out.mkdir(parents=True, exist_ok=True)
+    clock = {}
+    start = datetime.now(UTC)
+    sessions, entries = percar.load(data_root)
+    recorded = percar.record(sessions, entries)
+    clock["record_s"] = (datetime.now(UTC) - start).total_seconds()
+    grid, chosen = percar.search(recorded)
+    clock["search_s"] = (datetime.now(UTC) - start).total_seconds() - clock["record_s"]
+    rule, result = percar.rolling(sessions, entries, chosen)
+    clock["rolling_s"] = (datetime.now(UTC) - start).total_seconds() - sum(clock.values())
+    frame = percar.scored(rule, result.cars)
+    names = [m.name for m in rule.models]
+    scores = percar.score_table(frame, names)
+    summary = percar.summary_table(scores)
+    monthly = percar.figure_one(frame, FIGURE_ONE_RULES)
+
+    grid.to_csv(out / "settings_search.csv", index=False)
+    frame.drop(columns=["user_id"]).to_csv(out / "predictions.csv.gz", index=False)
+    scores.to_csv(out / "scores.csv", index=False)
+    summary.to_csv(out / "summary.csv", index=False)
+    percar.d10(scores).to_csv(out / "d10_reading.csv", index=False)
+    percar.smape(frame, names).to_csv(out / "smape.csv", index=False)
+    pd.DataFrame(rule.fit_log).to_csv(out / "fits.csv", index=False)
+    monthly.to_csv(out / "figure1.csv", index=False)
+    figure = plot_monthly(
+        monthly,
+        percar.FIGURE_LEVEL,
+        out / "figure1.png",
+        rules=list(FIGURE_ONE_RULES.values()),
+        title="Per-car lower bound on remaining stay at 10:00, level 0.10",
+        note=(
+            "Caltech, weekdays at 10:00, every car plugged in; months through August 2019 "
+            "only. Each model refitted monthly on what was known then. Months with under 20 "
+            "bounds are left blank."
+        ),
+    )
+    counts = frame.groupby("period").agg(
+        car_days=("session_id", "size"),
+        days=("decision_time", "nunique"),
+        known=("linked", "mean"),
+        typed=("typed", "mean"),
+    )
+    manifest = {
+        "run": "percar",
+        "made_at_utc": start.isoformat(timespec="seconds"),
+        "package_version": __version__,
+        "code": _git_state(),
+        "python": platform.python_version(),
+        "pandas": pd.__version__,
+        "until": str(percar.SELECTION_END),
+        "sessions": len(sessions),
+        "app_entries": len(entries),
+        "levels": [float(q) for q in percar.LEVELS],
+        "grid": percar.GRID,
+        "fixed": percar.FIXED,
+        "chosen": chosen,
+        "periods": counts.reset_index().to_dict(orient="records"),
+        "seconds": clock,
+        "outputs": sorted(p.name for p in out.iterdir() if p.name != "manifest.json"),
+        "figure": figure.name,
+    }
+    (out / "manifest.json").write_text(json.dumps(manifest, indent=2, default=str) + "\n")
+    return manifest
+
+
 def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
@@ -437,6 +508,13 @@ def main(argv: list[str] | None = None) -> int:
     snap.add_argument("snapshots", type=Path, help="folder holding the four pinned CSV files")
     snap.add_argument("--data", type=Path, default=Path("data"))
 
+    per_car = commands.add_parser(
+        "percar",
+        help="the per-car models and baselines on Caltech months through August 2019",
+    )
+    per_car.add_argument("--data", type=Path, default=Path("data"))
+    per_car.add_argument("--out", type=Path, default=Path("results/percar"))
+
     commands.add_parser(
         "requirements",
         help="days the 2022 drift theorem needs for a 90%%-of-days offer, beside the days held",
@@ -503,6 +581,9 @@ def main(argv: list[str] | None = None) -> int:
         print("cleaning:", ", ".join(f"{k} {v}" for k, v in counts.items()))
         sealed_from = data.TEST_PERIODS["caltech"]
         print(acn.check_snapshots(args.snapshots, sessions, sealed_from).to_string(index=False))
+    elif args.command == "percar":
+        manifest = run_percar(args.data, args.out)
+        print(json.dumps({k: manifest[k] for k in ("chosen", "periods", "seconds")}, indent=2))
     elif args.command == "requirements":
         print(calibrate.requirements_table().to_string(index=False))
         print()

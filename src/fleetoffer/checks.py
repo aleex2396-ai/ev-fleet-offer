@@ -92,6 +92,39 @@ def scramble_future(sessions: pd.DataFrame, cutoff: pd.Timestamp, *, seed: int =
     return validate_sessions(combined) if len(combined) else combined
 
 
+def scramble_entries(entries: pd.DataFrame, cutoff: pd.Timestamp, *, seed: int = 0) -> pd.DataFrame:
+    """A copy of the app entries that agrees with them on every entry recorded before
+    `cutoff`: later entries get new values and times (still at or after the cutoff), half of
+    them are dropped, and made-up entries are added for made-up sessions."""
+    cutoff = pd.Timestamp(cutoff).tz_convert("UTC")
+    rng = np.random.default_rng([seed, 2])
+    out = entries.copy()
+    later = out.index[out["modified_at"] >= cutoff]
+    out = out.drop(index=rng.choice(later, size=len(later) // 2, replace=False))
+    later = out["modified_at"] >= cutoff
+    n = int(later.sum())
+    out.loc[later, "modified_at"] = cutoff + pd.to_timedelta(rng.uniform(0.0, 2.0, n), unit="h")
+    minutes = rng.choice([30.0, 60.0, 480.0, 900.0], size=n)
+    out.loc[later, "minutes_available"] = minutes
+    out.loc[later, "requested_departure"] = out.loc[later, "modified_at"] + pd.to_timedelta(
+        minutes, unit="m"
+    )
+    out.loc[later, "kwh_requested"] = rng.uniform(30.0, 60.0, n)
+    starts = cutoff + pd.to_timedelta(rng.uniform(0.0, 24.0 * 30, 10), unit="h")
+    added = pd.DataFrame(
+        {
+            "session_id": [f"scrambled-{k}" for k in range(10)],
+            "entry": 0,
+            "modified_at": starts,
+            "minutes_available": 600.0,
+            "requested_departure": starts + pd.Timedelta(hours=10),
+            "kwh_requested": 50.0,
+        }
+    )
+    out = pd.concat([out, added], ignore_index=True)
+    return out.sort_values("modified_at", kind="stable").reset_index(drop=True)
+
+
 def default_cutoffs(sessions: pd.DataFrame, count: int = 6) -> list[pd.Timestamp]:
     """Cutoffs spread over the data, each two hours after some car plugged in (a busy time)."""
     table = validate_sessions(sessions)
@@ -184,17 +217,21 @@ def check_no_lookahead_days(
     The day-level version of the check (analysis plan, Section 7): the whole pipeline is run
     on the real table and on a copy scrambled after the cutoff, linear programme included,
     and every day before the cutoff must have the same cars, the same per-car bounds and the
-    same programme output to the last bit. Returns the number of days compared.
+    same programme output to the last bit. App entries given as ``entries`` are scrambled
+    after the cutoff too. Returns the number of days compared.
     """
     daily = fleet_options.get("daily", MORNING)
+    entries = fleet_options.pop("entries", None)
     cutoffs = default_day_cutoffs(sessions, daily) if cutoffs is None else cutoffs
     compared = 0
     for k, cutoff in enumerate(cutoffs):
         real = validate_sessions(sessions)
         scrambled = scramble_future(real, cutoff, seed=seed + k)
+        later = None if entries is None else scramble_entries(entries, cutoff, seed=seed + k)
         cutoff = pd.Timestamp(cutoff).tz_convert("UTC")
         a, b = (
-            fleet_replay(table, rule_factory(table), **fleet_options) for table in (real, scrambled)
+            fleet_replay(table, rule_factory(table), entries=typed, **fleet_options)
+            for table, typed in ((real, entries), (scrambled, later))
         )
         days_a, days_b = (r.days[r.days["decision_time"] < cutoff] for r in (a, b))
         cars_a, cars_b = (r.cars[r.cars["decision_time"] < cutoff] for r in (a, b))

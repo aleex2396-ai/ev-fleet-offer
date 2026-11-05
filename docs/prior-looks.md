@@ -81,14 +81,14 @@ definitions (analysis plan, Section 10a), and the earlier figures are not used.
 The looks above concern stays, typed plans and session counts. None is recorded as computing
 a statistic of the energy cars took (the reading of 192 raw sessions below showed each one's
 recorded kWh), and the per-session time series (charging current and pilot signal) had not
-been downloaded for any period. At neither site has any of this
-project's quantities been computed: no learned per-car bound, no per-car flexibility set, no
+been downloaded for any period. Before this repository, none of this project's quantities had
+been computed at either site: no learned per-car bound, no per-car flexibility set, no
 offer from the inner approximation, no delivery check, no day-level calibration rule and no
 comparison of learned against population bounds. No rule with an online correction from its
-own record of held and failed bounds (adaptive conformal inference) has been run at either
+own record of held and failed bounds (adaptive conformal inference) had been run at either
 site, nor the drift-aware rule of Yan, Parise and Bitar with its drift allowance estimated
 from the data as it arrives (it was run at Caltech only with fixed drift values, as listed
-above).
+above). What this repository has computed since is listed in the next section.
 
 ## Looks made as part of this repository
 
@@ -103,3 +103,16 @@ above).
   2020), and the energy statistics of `docs/data.md`, including, after the check failed,
   energy between 10:00 and 20:00 for the 95 sampled sessions present at 10:00 on a weekday.
   No stay statistic and no bound was computed. Nothing from March 2020 onward was requested.
+- The per-car layer (analysis plan, Sections 4 and 5), on Caltech car-days from the first
+  download month to August 2019 only: the inputs known at 10:00, the counts of linked sessions
+  and typed plans in `docs/data.md`, the settings search on the internal split (models fitted
+  at 1 January 2019 and scored on January to April 2019), and the chosen models refitted
+  monthly and scored on every month they could be fitted for, reported separately for the
+  months before 2019, the internal split and the model-selection months (May to August 2019):
+  pinball loss, the share of bounds missed at each level, the error of the median, and Figure 1
+  for those months. A first search that gave the network and linear model the month as a number
+  was replaced before any later month was scored, and a first full run whose encoding of unseen
+  months left the linear model's predictions undetermined was replaced after it had scored May
+  to August 2019; `docs/theory.md` gives the numbers that showed it. No offer was built from
+  learned bounds, no delivery check and no day-level rule was run on real data, and nothing
+  from September 2019 onward was scored.

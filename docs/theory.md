@@ -171,6 +171,93 @@ bᵢ + wᵢ and bᵢ − wᵢ in every car's set; by convexity every a in betwee
 is allocated bᵢ + (a/A)wᵢ. Its size is A, in kWh moved out of or into 10:00–11:00. It is
 checked on its two ends and its reference, by the same two checks.
 
+## The per-car models and the settings searched
+
+Each model gives, for every car present at 10:00, lower quantiles of its remaining stay
+(hours, at most the 10-hour horizon) and of the energy it will take before 20:00 (kWh), at the
+16 levels 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.15, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9
+and 0.95 (`quantiles.LEVELS`). A level between two grid levels is read off by linear
+interpolation; below 0.002 the bound is the trivial one (deadline at 10:00, energy zero).
+
+**Families.** Gradient-boosted trees with pinball loss, one model per level and target
+(scikit-learn's `HistGradientBoostingRegressor`, station as a categorical input; primary). A
+network with one hidden layer (tanh) per target and one output per level, each output above
+the one below by a softplus increment so that quantiles never cross, trained with Adam on the
+mean pinball loss, the weights kept from the pass with the lowest loss on the last 15% of
+training car-days in time order (second). Linear quantile regression, solved exactly by
+linear programming with no penalty (baseline). Tree and linear quantiles that cross are
+sorted, which cannot increase the pinball loss (Chernozhukov, Fernández-Val and Galichon,
+2010). Inputs are listed in `features.py`; the baselines in `baselines.py`.
+
+**Inputs.** The trees take the calendar month as a number and the station as a category. The
+network and the linear model take the month as one indicator for each month present in their
+training car-days, and the station the same way; a month or station absent from training gets
+weight 1/k on each of the k seen, so the linear model predicts the average of their effects
+(all zeros would leave that prediction undetermined, since the indicators of every training row
+add up to the constant term). Their other inputs are standardised on the training car-days,
+with missing values set to zero. A first run on the internal split gave these two models the
+month as a number. With a 90-day window their training months are October to December, so the
+month number rises steadily through training and then falls to 1 to 4 in the scored months, and
+both models extended the trend into months they had never seen. With indicators the network's
+mean pinball loss on the split (64 hidden units) fell from 0.523 to 0.474 hours for stay and
+from 1.014 to 0.997 kWh for energy; the trees, which cannot extrapolate beyond the months they
+split on, were unchanged. The selection was run again with indicators; no month after April
+2019 had been scored when this was changed. That run gave unseen months and stations all zeros,
+and under monthly refits, where the scored month is never among the training months of a 90-day
+window, the linear model's predictions then depended on how each fit split the constant term
+from the month effects: its mean pinball loss for stay was 0.81 hours on January to April 2019
+against 0.53 in the single fit at 1 January. The run had scored May to August 2019. The
+encoding above replaced it, and the search and refits were run again; the trees take neither
+indicator and were unaffected.
+
+**Refits.** At the first local midnight of each month every model is refitted on the car-days
+whose outcome had been revealed by then, leaving out cars plugged in within 24 hours of the
+refit (check D11) and car-days older than the history window; the rules that learn from whole
+sessions see the sessions ended by then with the same exclusions. A model with fewer than 200
+training car-days gives no bound.
+
+**Scores.** A stay bound counts as missed if, rounded down to the 15-minute grid as the
+engine uses it, it is later than the true deadline; an energy bound if it exceeds the energy
+taken. Pinball loss is computed in hours against the deadline on the grid, and in kWh.
+
+**Selection.** Settings are chosen on the internal split of the training period: each model
+is fitted once at 1 January 2019 on what was known then and scored on the car-days of
+January to April 2019. The score of a setting is its mean pinball loss for stay divided by
+that of the population rule with all history on the same car-days, plus the same ratio for
+energy; lower is better, and ties go to the earlier grid entry. The history window is chosen
+first, on the population rule, whose only setting it is, and is then shared by every model
+(analysis plan, Section 5: arms 4, 5 and 6 share it); the tree and network settings are then
+chosen with that window. The mixture's number of components is chosen by the log-likelihood of
+the sessions plugged in from January to April 2019, as Lee, Li and Low chose theirs by
+held-out fit. The chosen settings are then frozen; they are refitted monthly through August
+2019 and scored on the model-selection months, May to August 2019. The analysis plan allows
+those months to choose settings as well (Section 4); for the per-car models they only score,
+and they are left for the day-level settings fixed before the tag. No later month is scored
+before the tag.
+
+| Setting | Values searched | Fixed |
+|---|---|---|
+| History window (days) | all, 90, 180, 365 | |
+| Trees: learning rate | 0.05, 0.1 | 200 iterations, no early stopping, seed 0 |
+| Trees: leaves per tree | 7, 15, 31 | |
+| Trees: smallest leaf (car-days) | 20, 100 | |
+| Network: hidden units | 16, 64 | step 0.003, at most 300 passes, stop after 20 without gain, batches of 256, seed 0 |
+| Network: weight decay | 0.0001, 0.01 | |
+| Mixture: components | 2 to 8 | full covariance, 3 starts, seed 0; per-driver weights from 5 sessions |
+| Stratified table | | cells of at least 30 car-days |
+| Driver's own past | | at least 3 earlier sessions that lasted as long |
+| Linear quantile regression | | no penalty |
+
+**Chosen** (`fleetoffer percar` writes the whole search to `settings_search.csv`): a 90-day
+history window (population score 1.970, against 2.000 with all history and 2.015 with 180 days;
+all history and 365 days coincide here, since the data begin in April 2018); trees with
+learning rate 0.1, 7 leaves and smallest leaf 20 (score 1.265; the twelve tree settings ranged
+from 1.265 to 1.282); a network with 16 hidden units and weight decay 0.0001 (1.475; range
+1.475 to 1.583); a mixture of 7 components. On the internal split the network's kept weights
+came from within its first 12 passes for each target, and training all 300 passes keeps the
+same weights: its loss on the held-back weeks never improves later. At this data size (1,931
+training car-days) it is the weaker learned family.
+
 ## Day-level calibration under drift: Yan, Parise and Bitar (2022)
 
 Yan, Parise and Bitar, "Data-driven approximations of chance constrained programs in

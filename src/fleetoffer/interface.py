@@ -18,7 +18,7 @@ decision time count as not yet known.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 import pandas as pd
@@ -132,12 +132,14 @@ class DayView:
     where the table has them, and ``user_id`` only where the link to the driver was recorded
     before the decision time (a ``linked_time`` column; without one, no link is shown).
     ``ended`` holds every session that had ended before the decision time, with all its
-    fields, and ``user_id`` shown on the same condition.
+    fields, and ``user_id`` shown on the same condition. ``entries`` holds the app entries
+    (typed plans) recorded before the decision time, of any session.
     """
 
     decision_time: pd.Timestamp
     present: pd.DataFrame
     ended: pd.DataFrame
+    entries: pd.DataFrame = field(default_factory=pd.DataFrame)
 
 
 @dataclass(frozen=True)
