@@ -23,7 +23,7 @@ import numpy as np
 import pandas as pd
 
 from fleetoffer import __version__, acn, calibrate, data
-from fleetoffer.engine import Daily, replay
+from fleetoffer.engine import Daily, energy_in_window, replay
 from fleetoffer.figures import plot_monthly
 from fleetoffer.models import FrozenQuantile, RollingQuantile
 from fleetoffer.synthetic import Regime, demo_regimes, make_sessions
@@ -215,6 +215,113 @@ def d1_summary(table: pd.DataFrame) -> dict:
     }
 
 
+def d1_readings(sample: pd.DataFrame, records: list[dict], table: pd.DataFrame) -> dict:
+    """Readings taken after check D1 failed, to say why. They change neither its rule nor result.
+
+    - Sessions whose timestamps were not strictly increasing: whether only repeated times
+      (no time going backwards) caused it, and how much of each series was repeated.
+    - The ratio of integrated to recorded energy among usable sessions: its spread, the line
+      voltage at which the median ratio would be 1, and the error left once that one common
+      scale is removed.
+    - Peak current and peak pilot signal among usable sessions.
+    - The fallback estimate of energy between 10:00 and 20:00 against the series (scaled to
+      the recorded total, so only the timing is compared), for usable sessions plugged in
+      before 10:00 on a weekday and still plugged in at 10:00 that day.
+    """
+    by_id = {str(r.get("sessionID")): r for r in records}
+    t = table.assign(session_id=table["session_id"].astype(str)).set_index("session_id")
+
+    repeats_only, repeated_share = 0, []
+    for sid in t.index[t["reason"] == "not_increasing"]:
+        stamps = pd.Series(by_id[sid]["chargingCurrent"]["timestamps"], dtype=object)
+        step = np.diff(data.to_hours(pd.to_datetime(stamps, format=data._TIME, utc=True)))
+        repeats_only += bool((step >= 0).all())
+        repeated_share.append(float((step == 0).mean()))
+
+    usable = t[(t["reason"] == "usable") & (t["kwh_recorded"] > 0)]
+    ratio = usable["kwh_integrated"] / usable["kwh_recorded"]
+    scale = float(ratio.median())
+    rescaled_error = (ratio / scale - 1.0).abs()
+    peak_amps = [max(map(float, by_id[s]["chargingCurrent"]["current"])) for s in usable.index]
+    pilots = [(by_id[s].get("pilotSignal") or {}).get("pilot") or [] for s in usable.index]
+    peak_pilot = [max(map(float, p)) for p in pilots if p]
+
+    s = sample.assign(session_id=sample["session_id"].astype(str)).set_index("session_id")
+    s = s.loc[usable.index]
+    local = s["connect_time"].dt.tz_convert(DECISION.tz)
+    ten = (local.dt.normalize() + pd.Timedelta(hours=10)).dt.tz_convert("UTC")
+    present = (local.dt.day_of_week < 5) & (s["connect_time"] < ten) & (s["disconnect_time"] >= ten)
+    s, ten_h = s[present], data.to_hours(ten[present])
+    by_series = []
+    for sid, start in zip(s.index, ten_h, strict=True):
+        series, _ = data.parse_series(by_id[sid])
+        share = data.energy_kwh(series, start, start + 10.0) / data.energy_kwh(series)
+        by_series.append(float(s.at[sid, "kwh_delivered"]) * share)
+    by_series = np.array(by_series)
+    estimate = energy_in_window(
+        data.to_hours(s["connect_time"]),
+        data.to_hours(s["done_charging_time"]),
+        data.to_hours(s["disconnect_time"]),
+        s["kwh_delivered"].to_numpy(dtype=float),
+        ten_h,
+        ten_h + 10.0,
+    )
+    gap = np.abs(estimate - by_series)
+    some = by_series > 0.5
+
+    return {
+        "note": "read after the check failed; the rule and its result are unchanged",
+        "not_increasing": {
+            "sessions": len(repeated_share),
+            "only_repeated_times": repeats_only,
+            "median_share_of_samples_repeated": float(np.median(repeated_share))
+            if repeated_share
+            else None,
+        },
+        "no_series_recorded_kwh": sorted(
+            round(float(v), 2) for v in t.loc[t["reason"] == "no_series", "kwh_recorded"]
+        ),
+        "ratio_integrated_to_recorded": {
+            "sessions": len(ratio),
+            "quantiles": {str(q): float(ratio.quantile(q)) for q in (0.05, 0.25, 0.5, 0.75, 0.95)},
+            "volts_for_median_ratio_1": data.VOLTS / scale,
+            "median_abs_rel_error_after_common_scale": float(rescaled_error.median()),
+            "share_within_5_percent_after_common_scale": float((rescaled_error <= 0.05).mean()),
+        },
+        "peak_current_amps_max": max(peak_amps),
+        "sessions_peak_current_above_36_amps": int(sum(a > 36.0 for a in peak_amps)),
+        "peak_pilot_amps_max": max(peak_pilot) if peak_pilot else None,
+        "fallback_10_to_20": {
+            "cars": len(s),
+            "kwh_by_series_median": float(np.median(by_series)),
+            "abs_gap_kwh_median": float(np.median(gap)),
+            "abs_gap_kwh_90th_percentile": float(np.quantile(gap, 0.9)),
+            "rel_gap_median_where_series_above_half_kwh": float(
+                np.median(gap[some] / by_series[some])
+            ),
+            "kwh_total_by_series": float(by_series.sum()),
+            "kwh_total_by_fallback": float(estimate.sum()),
+            "cars_above_half_kwh_by_series": int(some.sum()),
+            "cars_above_half_kwh_by_fallback": int((estimate > 0.5).sum()),
+        },
+    }
+
+
+def charging_done_counts(sessions: pd.DataFrame) -> dict:
+    """How often the charging-done time, which D1's fallback spreads energy up to, is unusable."""
+    done, start, end = (
+        sessions["done_charging_time"],
+        sessions["connect_time"],
+        sessions["disconnect_time"],
+    )
+    return {
+        "sessions": len(sessions),
+        "missing": int(done.isna().sum()),
+        "not_after_plug_in": int((done <= start).sum()),
+        "after_unplug": int((done > end).sum()),
+    }
+
+
 def run_d1(data_root: Path, out: Path) -> dict:
     """Check D1 on the stored sample: share usable, and integrated against recorded energy."""
     out = Path(out)
@@ -228,6 +335,10 @@ def run_d1(data_root: Path, out: Path) -> dict:
     summary = d1_summary(table)
     table.to_csv(out / "d1_sessions.csv", index=False)
     (out / "d1_summary.json").write_text(json.dumps(summary, indent=2) + "\n")
+    if not summary["passes"]:
+        readings = d1_readings(sample, records, table)
+        readings["charging_done_in_development"] = charging_done_counts(sessions)
+        (out / "d1_readings.json").write_text(json.dumps(readings, indent=2) + "\n")
     manifest = {
         "run": "d1",
         "made_at_utc": datetime.now(UTC).isoformat(timespec="seconds"),

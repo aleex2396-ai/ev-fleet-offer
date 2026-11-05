@@ -6,7 +6,7 @@ import pytest
 from helpers import FixedBound, Spy, hours_from_t0, table
 
 from fleetoffer.data import from_hours, to_hours
-from fleetoffer.engine import Daily, decision_times, replay
+from fleetoffer.engine import Daily, decision_times, energy_in_window, replay
 from fleetoffer.interface import Rule
 
 
@@ -160,3 +160,17 @@ def test_daily_replay_scores_each_present_car():
     assert list(decisions["held"]) == [True, False, True]
     with pytest.raises(ValueError):
         decision_times(np.array([0.0]), np.array([1.0]), 1.0, Daily())
+
+
+def test_energy_in_window_spreads_the_total_from_plug_in_to_the_end_of_charging():
+    connect = np.zeros(4)
+    done = np.array([4.0, np.nan, -1.0, 9.0])  # recorded; missing; before plug-in; after unplug
+    disconnect = np.array([8.0, 8.0, 8.0, 6.0])
+    kwh = np.array([8.0, 8.0, 8.0, 6.0])
+    got = energy_in_window(connect, done, disconnect, kwh, 2.0, 20.0)
+    assert got == pytest.approx([4.0, 6.0, 6.0, 4.0])
+    assert energy_in_window(connect, done, disconnect, kwh, 5.0, 20.0)[0] == 0.0
+    whole = energy_in_window(connect, done, disconnect, kwh, -math.inf, math.inf)
+    assert whole == pytest.approx(kwh)
+    per_car = energy_in_window(connect, done, disconnect, kwh, np.array([0, 2, 4, 6.0]), 20.0)
+    assert per_car == pytest.approx([8.0, 6.0, 4.0, 0.0])

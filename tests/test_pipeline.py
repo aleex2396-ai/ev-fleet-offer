@@ -6,6 +6,8 @@ import pytest
 
 from fleetoffer.pipeline import (
     D1_SAMPLE,
+    charging_done_counts,
+    d1_readings,
     d1_sample,
     d1_summary,
     d1_table,
@@ -129,3 +131,74 @@ def test_d1_table_compares_integrated_with_recorded_energy():
     assert table.loc["a", "kwh_integrated"] == pytest.approx(2.08)  # 10 A, 1 h, 208 V
     assert table.loc["a", "abs_rel_error"] == pytest.approx(0.04)
     assert table.loc["b", "reason"] == "no_series" and np.isnan(table.loc["b", "abs_rel_error"])
+
+
+def test_d1_readings_explain_a_failure_without_changing_it():
+    def stamps(*hours):
+        return [f"Mon, 03 Jun 2019 {h:02d}:00:00 GMT" for h in hours]
+
+    records = [
+        {  # plugged in 08:00 Pacific, present at 10:00; front-loaded charging
+            "sessionID": "a",
+            "chargingCurrent": {
+                "timestamps": stamps(15, 16, 17, 18, 19),
+                "current": [10, 10, 5, 5, 0],
+            },
+            "pilotSignal": {"timestamps": stamps(15, 19), "pilot": [32, 32]},
+        },
+        {  # a repeated timestamp
+            "sessionID": "b",
+            "chargingCurrent": {"timestamps": stamps(15, 15, 16), "current": [1, 1, 0]},
+        },
+        {"sessionID": "c"},
+        {  # plugged in 11:00 Pacific, after the decision
+            "sessionID": "d",
+            "chargingCurrent": {"timestamps": stamps(18, 19, 20), "current": [20, 20, 0]},
+        },
+    ]
+    utc = lambda h: pd.Timestamp("2019-06-03", tz="UTC") + pd.Timedelta(hours=h)  # noqa: E731
+    sample = pd.DataFrame(
+        {
+            "session_id": ["a", "b", "c", "d"],
+            "connect_time": [utc(15), utc(15), utc(15), utc(18)],
+            "done_charging_time": [utc(19), utc(16), utc(16), utc(20)],
+            "disconnect_time": [utc(25), utc(17), utc(17), utc(21)],
+            "kwh_delivered": [10.0, 1.0, 3.0, 8.0],
+        }
+    )
+    table = d1_table(sample, records)
+    readings = d1_readings(sample, records, table)
+    assert readings["not_increasing"] == {
+        "sessions": 1,
+        "only_repeated_times": 1,
+        "median_share_of_samples_repeated": 0.5,
+    }
+    assert readings["no_series_recorded_kwh"] == [3.0]
+    ratio = readings["ratio_integrated_to_recorded"]
+    assert ratio["quantiles"]["0.5"] == pytest.approx((0.624 + 1.04) / 2)
+    assert ratio["median_abs_rel_error_after_common_scale"] == pytest.approx(0.25)
+    assert readings["peak_current_amps_max"] == 20.0
+    assert readings["peak_pilot_amps_max"] == 32.0
+    fallback = readings["fallback_10_to_20"]
+    assert fallback["cars"] == 1  # only "a" is present at 10:00
+    assert fallback["kwh_total_by_series"] == pytest.approx(10.0 / 3.0)  # 10 of 30 amp-hours
+    assert fallback["kwh_total_by_fallback"] == pytest.approx(5.0)  # 2 of 4 hours to done
+    assert d1_summary(table)["passes"] is False
+
+
+def test_charging_done_counts():
+    t = pd.Timestamp("2019-06-03", tz="UTC")
+    h = pd.Timedelta(hours=1)
+    sessions = pd.DataFrame(
+        {
+            "connect_time": [t, t, t, t],
+            "done_charging_time": [t + h, pd.NaT, t, t + 3 * h],
+            "disconnect_time": [t + 2 * h] * 4,
+        }
+    )
+    assert charging_done_counts(sessions) == {
+        "sessions": 4,
+        "missing": 1,
+        "not_after_plug_in": 1,
+        "after_unplug": 1,
+    }

@@ -107,7 +107,7 @@ says so, and they are not called defaults here.
 ## Per-session time series
 
 The energy a car takes after 10:00, and the pilot signal the charging network sent it, are
-not fields of the session record. They come from the API's time-series endpoint
+not fields of the session record. They would come from the API's time-series endpoint
 (`sessions/<site>/ts`), which takes the same plug-in-time windows as the session endpoint and
 returns, for each session, the charging current and the pilot signal at the network's sampling
 times, about every four seconds. Its records are large (about 0.6 MB of JSON per session), so
@@ -137,8 +137,58 @@ per session by a one-second window on its plug-in time (`fingerprints/caltech-se
 - *Pass:* at least 95% of the sample usable, and a median error of at most 5% (analysis plan,
   Section 10a). `fleetoffer d1` writes the per-session table, the summary and a manifest.
 
-The result, the coverage by month and the rule for sessions without a usable series are
-reported here once the check has run.
+**Result.** `fleetoffer d1`, on the stored sample, fails on both counts:
+
+| | Rule | Sample |
+|---|---|---|
+| Usable series | at least 95% | 256 of 300 (85.3%) |
+| Median error, usable sessions | at most 5% | 5.09% (256 sessions; 48% within 5%) |
+
+Of the 44 sessions without a usable series, 8 have no series at all (recorded energy 0.9 to
+34.4 kWh) and 36 have timestamps that are not strictly increasing. No sampled current is
+negative.
+
+**What the failure consists of.** The same command writes these readings
+(`d1_readings.json`) only when the check fails; they were taken after the result and change
+neither the rule nor the result.
+
+- All 36 non-increasing series repeat a timestamp; none goes backwards. In the median such
+  series, 0.02% of samples repeat a time.
+- Most of the error is one common scale. The ratio of integrated to recorded energy has a
+  median of 0.951 (5th to 95th percentile, 0.923 to 1.097). The median ratio would be 1 at
+  about 219 V rather than the 208 V fixed in the rule; the session record does not report
+  voltage, so this is a reading, not a finding. With that one scale removed, the median error
+  is 1.5% and 89% of sessions are within 5%.
+- No sampled current exceeds 34.7 A and no pilot signal exceeds 32 A.
+
+The readings point at the rule's two fixed choices, 208 V and a strictly increasing time
+order, more than at the series. Changing either now would be choosing the rule after seeing
+its result, so the check stands as failed and the fallback it states applies.
+
+**The fallback** (analysis plan, Section 10a). Energy between 10:00 and 20:00 is estimated
+from the session record: the recorded energy is spread evenly from plug-in to the end of
+charging, which is the charging-done time if it is recorded and later than plug-in and
+otherwise unplug; a charging-done time after unplug counts as unplug
+(`engine.energy_in_window`). Of the 27,584 development sessions, the charging-done time is
+missing in 721, not after plug-in in 27, and after unplug in 1,131. The estimate uses the
+recorded total and the charging-done time, which are known only later, so it scores days and
+trains models on past sessions and is never an input at 10:00.
+
+On the sample, for the 95 usable sessions plugged in before 10:00 on a weekday and still
+plugged in at 10:00 that day, the estimate is compared with the series scaled to the recorded
+total, so that only the timing differs. The series give a median of 2.23 kWh between 10:00
+and 20:00. The median absolute gap is 0.23 kWh (90th percentile 1.67 kWh), and 8.9% of the
+series value in the median among the 65 cars above 0.5 kWh. The estimate leans late: 513.5 kWh
+in total against 469.5 kWh (9.4% more), and 70 cars above 0.5 kWh against 65, as expected if
+charging runs faster early in a session than the flat spread assumes.
+
+**What follows, as the plan states it** (Sections 10 and 10a). The energy ceiling is
+approximate and is called so wherever it is used. The realised-cap sensitivity, which needed
+the pilot signal of every session, is dropped. The power cap is an assumption throughout:
+check D2 needs measured power at each station, which only the series give, so 6.7 kW stands
+for all stations, with 3.3 kW and 11 kW as sensitivities. The series of all development
+sessions are not fetched; `fleetoffer series caltech` remains for anyone who wants them. The
+sample's series stay stored and fingerprinted as the record of the check.
 
 ## Check against an independent public copy
 

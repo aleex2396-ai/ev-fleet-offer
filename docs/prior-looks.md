@@ -98,3 +98,8 @@ above).
   2020 and from 2021, including three drivers followed over 20 visits in each period: for each
   session its plug-in and unplug times, stay, recorded kWh, driver link and typed plan, read
   without computing statistics.
+- Check D1 (analysis plan, Section 10a): the time series of 300 development sessions drawn by
+  a fixed seed, 50 of them from the frozen evaluation months (September 2019 to February
+  2020), and the energy statistics of `docs/data.md`, including, after the check failed,
+  energy between 10:00 and 20:00 for the 95 sampled sessions present at 10:00 on a weekday.
+  No stay statistic and no bound was computed. Nothing from March 2020 onward was requested.

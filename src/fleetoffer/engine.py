@@ -99,6 +99,32 @@ def decision_times(
     return out
 
 
+def energy_in_window(
+    connect_h: np.ndarray,
+    done_h: np.ndarray,
+    disconnect_h: np.ndarray,
+    kwh: np.ndarray,
+    start_h: float | np.ndarray,
+    end_h: float | np.ndarray,
+) -> np.ndarray:
+    """Energy each session took between `start_h` and `end_h`, by the fallback of check D1.
+
+    The per-session time series failed check D1 (analysis plan, Section 10a; `docs/data.md`),
+    so the session's recorded energy is spread evenly from plug-in to the end of charging. The
+    end of charging is the charging-done time if one is recorded after plug-in, otherwise
+    unplug; a charging-done time after unplug counts as unplug. The estimate uses the
+    recorded total and the charging-done time, which are known only later, so it is a score
+    and a training target, never an input at the decision time.
+    """
+    connect_h = np.asarray(connect_h, dtype=float)
+    disconnect_h = np.asarray(disconnect_h, dtype=float)
+    done_h = np.asarray(done_h, dtype=float)
+    ends = np.where(np.isfinite(done_h) & (done_h > connect_h), done_h, disconnect_h)
+    ends = np.minimum(ends, disconnect_h)
+    overlap = np.minimum(ends, end_h) - np.maximum(connect_h, start_h)
+    return np.asarray(kwh, dtype=float) * np.clip(overlap, 0.0, None) / (ends - connect_h)
+
+
 def replay(
     sessions: pd.DataFrame,
     rule: Rule,
