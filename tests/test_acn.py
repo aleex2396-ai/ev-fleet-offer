@@ -2,6 +2,7 @@
 
 import gzip
 import hashlib
+import re
 import urllib.parse
 
 import pandas as pd
@@ -245,3 +246,109 @@ def test_check_snapshots_lists_but_does_not_compare_sealed_ones(tmp_path, monkey
     result = acn.check_snapshots(tmp_path, table, sealed_from)
     assert list(result["status"]) == ["compared", "sealed test period"]
     assert result.loc[0, "both"] == 1
+
+
+# Per-session time series.
+
+TS_FMT = "%a, %d %b %Y %H:%M:%S GMT"
+
+
+def ts_record(i: int, connect: pd.Timestamp, samples: int = 3) -> dict:
+    times = [(connect + pd.Timedelta(seconds=4 * k)).strftime(TS_FMT) for k in range(samples)]
+    return {
+        "_id": f"ts{i:04d}",
+        "sessionID": f"s{i}",
+        "connectionTime": connect.strftime(TS_FMT),
+        "chargingCurrent": {"timestamps": times, "current": [10.0] * samples},
+        "_links": {"self": {"href": f"sessions/{i}"}},
+    }
+
+
+class FakeSeriesServer:
+    """Answers `sessions/<site>/ts` window queries in pages, as the API does."""
+
+    def __init__(self, records: list[dict]):
+        self.records = records
+        self.calls: list[str] = []
+
+    def __call__(self, url: str) -> dict:
+        self.calls.append(url)
+        assert "/ts?" in url
+        query = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)
+        lo, hi = re.findall(r'"([^"]+)"', query["where"][0])
+        lo, hi = (pd.to_datetime(x, format=TS_FMT, utc=True) for x in (lo, hi))
+        inside = [
+            r
+            for r in self.records
+            if lo <= pd.to_datetime(r["connectionTime"], format=TS_FMT, utc=True) < hi
+        ]
+        page, size = int(query["page"][0]), int(query["max_results"][0])
+        rows = [dict(r) for r in inside[(page - 1) * size : page * size]]
+        return {"_items": rows, "_meta": {"total": len(inside), "page": page}}
+
+
+def ts_records():
+    start = pd.Timestamp("2020-02-27 16:00", tz="UTC")
+    return [ts_record(i, start + pd.Timedelta(hours=7 * i)) for i in range(25)]
+
+
+def test_series_windows_stop_at_the_sealed_period():
+    until = pd.Timestamp("2020-03-01", tz="America/Los_Angeles")  # 08:00 UTC
+    windows = acn.series_windows("2020-01", "2020-04", until)
+    assert [w[0] for w in windows] == ["2020-01", "2020-02", "2020-03"]
+    assert windows[-1][1] == pd.Timestamp("2020-03-01 00:00", tz="UTC")
+    assert windows[-1][2] == pd.Timestamp("2020-03-01 08:00", tz="UTC")
+
+
+def test_fetch_series_site_pages_clips_and_resumes(tmp_path):
+    server = FakeSeriesServer(ts_records())
+    until = pd.Timestamp("2020-03-01", tz="America/Los_Angeles")
+    kwargs = {"until": until, "data_root": tmp_path, "fingerprint_dir": tmp_path, "get": server}
+    table = acn.fetch_series_site("caltech", "2020-02", "2020-03", **kwargs, progress=lambda _: 0)
+    # Sessions every 7 hours from 27 Feb 16:00 UTC (2020 is a leap year): eight in February,
+    # then s8 (1 March 00:00) and s9 (07:00) before 08:00 UTC; later ones are never requested.
+    assert list(table["sessions"]) == [8, 2]
+    assert all("ts?" in call for call in server.calls)
+    stored = acn.read_series(tmp_path, "caltech", "2020-03")
+    assert sorted(r["sessionID"] for r in stored) == ["s8", "s9"]
+    assert all("_links" not in r for r in stored)
+
+    calls = len(server.calls)
+    again = acn.fetch_series_site("caltech", "2020-02", "2020-03", **kwargs, progress=lambda _: 0)
+    assert len(server.calls) == calls  # nothing fetched twice
+    pd.testing.assert_frame_equal(again, table)
+    on_disk = pd.read_csv(tmp_path / "caltech-series.csv", dtype=str)
+    assert list(on_disk["month"]) == ["2020-02", "2020-03"]
+    report = acn.verify_series(tmp_path, tmp_path, "caltech-series", "caltech")
+    assert report["matches"].all()
+
+
+def test_series_pages_hold_ten_records():
+    server = FakeSeriesServer(ts_records())
+    start, end = pd.Timestamp("2020-02-01", tz="UTC"), pd.Timestamp("2020-04-01", tz="UTC")
+    items = acn.fetch_series_window("caltech", start, end, server)
+    assert len(items) == 25 and len(server.calls) == 3  # pages of 10, 10 and 5
+
+
+def test_fetch_series_sessions_takes_each_listed_session(tmp_path):
+    records = ts_records()
+    twin = ts_record(99, pd.to_datetime(records[3]["connectionTime"], format=TS_FMT, utc=True))
+    server = FakeSeriesServer([*records, twin])  # s99 plugs in at the same second as s3
+    listed = pd.DataFrame(
+        {
+            "session_id": ["s3", "s10"],
+            "connect_time": [
+                pd.to_datetime(records[k]["connectionTime"], format=TS_FMT, utc=True)
+                for k in (3, 10)
+            ],
+        }
+    )
+    table = acn.fetch_series_sessions(
+        "caltech", listed, "sample", data_root=tmp_path, fingerprint_dir=tmp_path, get=server
+    )
+    assert len(server.calls) == 2 and table.loc[0, "sessions"] == 2
+    stored = acn.read_series(tmp_path, "caltech", "sample")
+    assert sorted(r["sessionID"] for r in stored) == ["s10", "s3"]
+    assert acn.verify_series(tmp_path, tmp_path, "caltech-series-sample", "caltech")[
+        "matches"
+    ].all()

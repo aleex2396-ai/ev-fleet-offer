@@ -19,6 +19,7 @@ import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from fleetoffer import __version__, acn, calibrate, data
@@ -33,6 +34,13 @@ DECISION = Daily(at="10:00", tz=DEMO_TZ)
 
 # The months each site has sessions in the public API (checked 4 Nov 2026).
 SITE_MONTHS = {"caltech": ("2018-04", "2021-09"), "jpl": ("2018-09", "2021-09")}
+
+# Check D1 (analysis plan, Section 10a), fixed before any time series was fetched.
+D1_SAMPLE = 300
+D1_SEED = 20261105
+D1_NAME = "d1-sample"
+D1_MIN_USABLE = 0.95  # share of sampled sessions with a usable current series
+D1_MAX_MEDIAN_ERROR = 0.05  # median |integrated - recorded| / recorded, sessions with energy
 
 
 def _summarise(decisions: pd.DataFrame, keys: list[str]) -> pd.DataFrame:
@@ -145,6 +153,94 @@ def run_demo(
     return manifest
 
 
+def d1_sample(sessions: pd.DataFrame) -> pd.DataFrame:
+    """The seeded sample of development sessions for check D1, in plug-in order."""
+    ids = np.sort(sessions["session_id"].astype(str).to_numpy())
+    chosen = np.random.default_rng(D1_SEED).choice(ids, size=D1_SAMPLE, replace=False)
+    picked = sessions[sessions["session_id"].astype(str).isin(set(chosen))]
+    return picked.sort_values(["connect_time", "session_id"]).reset_index(drop=True)
+
+
+def d1_table(sessions: pd.DataFrame, records: list[dict]) -> pd.DataFrame:
+    """One row per sampled session: usable or why not, recorded and integrated energy."""
+    by_id = {str(r.get("sessionID")): r for r in records}
+    rows = []
+    for row in sessions.itertuples(index=False):
+        series, reason = data.parse_series(by_id[str(row.session_id)])
+        recorded = float(row.kwh_delivered)
+        integrated = data.energy_kwh(series) if series is not None else np.nan
+        rows.append(
+            {
+                "session_id": row.session_id,
+                "reason": reason,
+                "samples": len(series.times_h) if series is not None else 0,
+                "negative_samples": int((series.amps < 0).sum()) if series is not None else 0,
+                "kwh_recorded": recorded,
+                "kwh_integrated": integrated,
+                "abs_rel_error": abs(integrated - recorded) / recorded
+                if series is not None and recorded > 0
+                else np.nan,
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def d1_summary(table: pd.DataFrame) -> dict:
+    usable = table["reason"] == "usable"
+    errors = table["abs_rel_error"].dropna()
+    with_energy = table[usable & (table["kwh_recorded"] > 0)]
+    usable_share = float(usable.mean())
+    median_error = float(errors.median()) if len(errors) else float("nan")
+    return {
+        "sessions": len(table),
+        "usable": int(usable.sum()),
+        "usable_share": usable_share,
+        "reasons": table["reason"].value_counts().to_dict(),
+        "usable_with_recorded_energy": len(with_energy),
+        "usable_with_zero_recorded_energy": int((usable & (table["kwh_recorded"] <= 0)).sum()),
+        "median_abs_rel_error": median_error,
+        "share_within_5_percent": float((errors <= 0.05).mean()) if len(errors) else float("nan"),
+        "median_ratio_integrated_to_recorded": float(
+            (with_energy["kwh_integrated"] / with_energy["kwh_recorded"]).median()
+        )
+        if len(with_energy)
+        else float("nan"),
+        "sessions_with_negative_samples": int((table["negative_samples"] > 0).sum()),
+        "rule": {
+            "min_usable_share": D1_MIN_USABLE,
+            "max_median_abs_rel_error": D1_MAX_MEDIAN_ERROR,
+            "volts": data.VOLTS,
+        },
+        "passes": bool(usable_share >= D1_MIN_USABLE and median_error <= D1_MAX_MEDIAN_ERROR),
+    }
+
+
+def run_d1(data_root: Path, out: Path) -> dict:
+    """Check D1 on the stored sample: share usable, and integrated against recorded energy."""
+    out = Path(out)
+    out.mkdir(parents=True, exist_ok=True)
+    sessions, _ = data.load_sessions(data_root, "caltech")
+    sample = d1_sample(sessions)
+    records = data.load_series(data_root, "caltech", D1_NAME)
+    if {str(r.get("sessionID")) for r in records} != set(sample["session_id"].astype(str)):
+        raise ValueError("the stored D1 series are not the seeded sample")
+    table = d1_table(sample, records)
+    summary = d1_summary(table)
+    table.to_csv(out / "d1_sessions.csv", index=False)
+    (out / "d1_summary.json").write_text(json.dumps(summary, indent=2) + "\n")
+    manifest = {
+        "run": "d1",
+        "made_at_utc": datetime.now(UTC).isoformat(timespec="seconds"),
+        "package_version": __version__,
+        "code": _git_state(),
+        "parameters": {"sample": D1_SAMPLE, "seed": D1_SEED, "volts": data.VOLTS},
+        "inputs": {"series": acn.fingerprint(records), "sessions": len(sessions)},
+        "outputs": sorted(p.name for p in out.iterdir() if p.name != "manifest.json"),
+    }
+    (out / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+    return summary
+
+
 def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
@@ -189,8 +285,22 @@ def main(argv: list[str] | None = None) -> int:
         "verify", help="check downloaded months against the committed fingerprints"
     )
     verify.add_argument("site", choices=sorted(SITE_MONTHS))
+    verify.add_argument("--series", action="store_true", help="the time series, not the sessions")
     verify.add_argument("--data", type=Path, default=Path("data"))
     verify.add_argument("--fingerprints", type=Path, default=Path("fingerprints"))
+
+    series = commands.add_parser(
+        "series",
+        help="download Caltech's per-session time series for the development period (token)",
+    )
+    series.add_argument("site", choices=["caltech"])
+    series.add_argument("--sample", action="store_true", help="only the seeded sample of check D1")
+    series.add_argument("--data", type=Path, default=Path("data"))
+    series.add_argument("--fingerprints", type=Path, default=Path("fingerprints"))
+
+    d1 = commands.add_parser("d1", help="check D1: are the time series usable for energy?")
+    d1.add_argument("--data", type=Path, default=Path("data"))
+    d1.add_argument("--out", type=Path, default=Path("results/d1"))
 
     snap = commands.add_parser(
         "snapshot-check",
@@ -219,6 +329,13 @@ def main(argv: list[str] | None = None) -> int:
             get=acn.http_getter(acn.read_token()),
         )
         print(f"{args.site}: {int(table['sessions'].sum())} sessions in {len(table)} months")
+    elif args.command == "verify" and args.series:
+        failed = 0
+        for table in sorted(p.stem for p in args.fingerprints.glob(f"{args.site}-series*.csv")):
+            report = acn.verify_series(args.data, args.fingerprints, table, args.site)
+            failed += int((~report["matches"]).sum())
+            print(f"{table}: {int(report['matches'].sum())} of {len(report)} files match")
+        return int(failed > 0)
     elif args.command == "verify":
         report = acn.verify_fingerprints(args.data, args.fingerprints, args.site)
         bad = report[~report["matches"]]
@@ -226,6 +343,34 @@ def main(argv: list[str] | None = None) -> int:
         if len(bad):
             print(bad[["month", "sessions", "found_sessions"]].to_string(index=False))
             return 1
+    elif args.command == "series":
+        get = acn.http_getter(acn.read_token())
+        until = data.TEST_PERIODS[args.site]
+        if args.sample:
+            sessions, _ = data.load_sessions(args.data, args.site)
+            table = acn.fetch_series_sessions(
+                args.site,
+                d1_sample(sessions),
+                D1_NAME,
+                data_root=args.data,
+                fingerprint_dir=args.fingerprints,
+                get=get,
+            )
+        else:
+            first, _ = SITE_MONTHS[args.site]
+            table = acn.fetch_series_site(
+                args.site,
+                first,
+                until.tz_convert("UTC").strftime("%Y-%m"),
+                until=until,
+                data_root=args.data,
+                fingerprint_dir=args.fingerprints,
+                get=get,
+            )
+        print(f"{args.site} series: {int(table['sessions'].sum())} sessions stored")
+    elif args.command == "d1":
+        summary = run_d1(args.data, args.out)
+        print(json.dumps(summary, indent=2))
     elif args.command == "snapshot-check":
         sessions, counts = data.load_sessions(args.data, "caltech")
         print("cleaning:", ", ".join(f"{k} {v}" for k, v in counts.items()))

@@ -44,7 +44,7 @@ uv run fleetoffer fetch caltech    # stored under data/, never committed
 uv run fleetoffer verify caltech   # same data as this repository's fingerprints/caltech.csv?
 ```
 
-The energy delivered after 10:00 and the charger's pilot signal are not fields of the session record; they come from the per-session time series, which the API serves one session per request. `docs/data.md` describes what is downloaded, the cleaning rules and their counts, the coverage of the time series, the sealed periods, and a check of the download against an independent public copy. If you use the data, cite Lee, Li and Low (2019).
+The energy delivered after 10:00 and the charger's pilot signal are not fields of the session record; they come from the per-session time series, which the API serves from a separate endpoint, a few sessions per request. `docs/data.md` describes what is downloaded, the cleaning rules and their counts, the coverage of the time series, the sealed periods, and a check of the download against an independent public copy. If you use the data, cite Lee, Li and Low (2019).
 
 ## Closest work
 

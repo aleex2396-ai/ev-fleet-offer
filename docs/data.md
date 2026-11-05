@@ -107,18 +107,37 @@ says so, and they are not called defaults here.
 ## Per-session time series
 
 The energy a car takes after 10:00, and the pilot signal the charging network sent it, are
-not fields of the session record. They come from the API's time-series endpoint, one session
-per request: the charging current and the pilot signal at the network's sampling times.
-Energy after a time is the current integrated from that time on, at the station's voltage.
-The pilot signal is the network's own current limit sent to the car, not a capability of the
-vehicle, and is never used as an input at 10:00.
+not fields of the session record. They come from the API's time-series endpoint
+(`sessions/<site>/ts`), which takes the same plug-in-time windows as the session endpoint and
+returns, for each session, the charging current and the pilot signal at the network's sampling
+times, about every four seconds. Its records are large (about 0.6 MB of JSON per session), so
+pages hold 10 sessions. The pilot signal is the network's own current limit sent to the car,
+not a capability of the vehicle, and is never used as an input at 10:00.
 
-Check D1 of the analysis plan decides whether the series can be used: on a seeded sample of
-300 development sessions, at least 95% must have a usable current series, and the integrated
-energy must match the session's recorded kWh with a median absolute error of at most 5%. Its
-result, the coverage by month, and the rule for sessions without a usable series are reported
-here once the check has run. The series are stored and fingerprinted like the session
-months.
+`fleetoffer series caltech` fetches every development month this way, clipped at the start of
+the sealed test period, so that no record from it is requested; months are stored and
+fingerprinted like the session months (`fingerprints/caltech-series.csv`, with each month's
+UTC window). `fleetoffer series caltech --sample` fetches the sample of check D1, one request
+per session by a one-second window on its plug-in time (`fingerprints/caltech-series-d1-sample.csv`).
+`fleetoffer verify caltech --series` recomputes both.
+
+**The rules of check D1**, fixed in `pipeline.py` and `data.py` before any series was fetched:
+
+- *Sample:* 300 development sessions drawn without replacement from all 27,584, by
+  `numpy.random.default_rng(20261105)` over the sorted session IDs.
+- *Usable series:* a charging-current record with as many timestamps as values, at least two,
+  every timestamp readable and later than the one before, and every value a finite number.
+  Anything else is counted under its reason (`data.SERIES_REASONS`).
+- *Energy:* each sample's current, negative values counted as zero, holds until the next
+  sample; nothing is counted after the last one. Power is current times 208 V, the line
+  voltage at which a 32 A charger is the plan's 6.66 kW.
+- *Error:* |integrated − recorded| / recorded, for usable sessions whose recorded energy is
+  above zero; sessions with zero recorded energy are counted separately.
+- *Pass:* at least 95% of the sample usable, and a median error of at most 5% (analysis plan,
+  Section 10a). `fleetoffer d1` writes the per-session table, the summary and a manifest.
+
+The result, the coverage by month and the rule for sessions without a usable series are
+reported here once the check has run.
 
 ## Check against an independent public copy
 

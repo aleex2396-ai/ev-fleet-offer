@@ -24,6 +24,17 @@ commit and checked by SHA-256 before use; get them from
     https://github.com/chrisyeh96/sustaingym/tree/<SNAPSHOT_COMMIT>/sustaingym/data/evcharging/acn_data/caltech
 
 Each file covers whole days in Pacific time, both ends included, as its name says.
+
+The per-session time series (charging current and pilot signal, sampled about every four
+seconds) come from the API's time-series endpoint, ``sessions/<site>/ts``, which takes the
+same ``connectionTime`` windows. Its records are large, so pages hold 10 sessions, which keeps
+each request well under the server's timeout. Two ways in:
+
+- `fetch_series_site`: whole months, clipped at a given end time so that a sealed period is
+  never requested, stored in ``data/raw/<site>-series/<YYYY-MM>.json.gz`` with fingerprints
+  in ``fingerprints/<site>-series.csv``. A month already stored is not fetched again.
+- `fetch_series_sessions`: a list of sessions, one request each, by a one-second window on
+  the session's plug-in time, stored as one named file with its own fingerprint.
 """
 
 from __future__ import annotations
@@ -217,6 +228,166 @@ def verify_fingerprints(data_root: Path, fingerprint_dir: Path, site: str) -> pd
             {"month": month, "found_sessions": len(items), "found_sha256": fingerprint(items)}
         )
     report = expected.merge(pd.DataFrame(found), on="month")
+    report["matches"] = report["sha256"] == report["found_sha256"]
+    return report
+
+
+# Per-session time series.
+
+SERIES_PAGE_SIZE = 10
+_TIME = "%a, %d %b %Y %H:%M:%S GMT"
+
+
+def series_query(site: str, start: pd.Timestamp, end: pd.Timestamp, page: int, size: int) -> str:
+    """Time-series records of sessions plugged in from `start` (included) to `end` (excluded)."""
+    where = f'connectionTime>="{start.strftime(_TIME)}" and connectionTime<"{end.strftime(_TIME)}"'
+    params = {"where": where, "page": page, "max_results": size}
+    return f"{API}{site}/ts?{urllib.parse.urlencode(params)}"
+
+
+def fetch_series_window(
+    site: str, start: pd.Timestamp, end: pd.Timestamp, get: Getter, *, attempts: int = 3
+) -> list[dict]:
+    """Every time-series record of sessions plugged in during [start, end), checked complete."""
+    if site not in SITES:
+        raise ValueError(f"unknown site {site!r}")
+    for _ in range(attempts):
+        items: list[dict] = []
+        page, total = 1, None
+        while True:
+            data = get(series_query(site, start, end, page, SERIES_PAGE_SIZE))
+            batch = data.get("_items") or []
+            total = (data.get("_meta") or {}).get("total")
+            for item in batch:
+                item.pop("_links", None)
+            items.extend(batch)
+            if len(batch) < SERIES_PAGE_SIZE or (total is not None and len(items) >= total):
+                break
+            page += 1
+        ids = [item["_id"] for item in items]
+        if total is not None and len(items) == total and len(set(ids)) == len(ids):
+            return items
+    raise FetchError(
+        f"{site} series {start:%Y-%m-%d %H:%M} to {end:%Y-%m-%d %H:%M}: received {len(items)} "
+        f"records ({len(set(ids))} distinct) but the server reports {total}"
+    )
+
+
+def series_path(root: Path, site: str, name: str) -> Path:
+    return Path(root) / "raw" / f"{site}-series" / f"{name}.json.gz"
+
+
+def save_series(root: Path, site: str, name: str, items: list[dict]) -> Path:
+    path = series_path(root, site, name)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with gzip.GzipFile(path, "wb", mtime=0) as f:
+        f.write(canonical_bytes(items))
+    return path
+
+
+def read_series(root: Path, site: str, name: str) -> list[dict]:
+    with gzip.open(series_path(root, site, name), "rb") as f:
+        return json.loads(f.read())
+
+
+def series_windows(
+    first: str, last: str, until: pd.Timestamp
+) -> list[tuple[str, pd.Timestamp, pd.Timestamp]]:
+    """(month, start, end) UTC windows from `first` to `last`, each clipped to end by `until`."""
+    until = pd.Timestamp(until).tz_convert("UTC")
+    out = []
+    for month in months_between(first, last):
+        start, end = month_window(month)
+        if start >= until:
+            break
+        out.append((month, start, min(end, until)))
+    return out
+
+
+def fetch_series_site(
+    site: str,
+    first: str,
+    last: str,
+    *,
+    until: pd.Timestamp,
+    data_root: Path,
+    fingerprint_dir: Path,
+    get: Getter,
+    progress: Callable[[str], None] = print,
+) -> pd.DataFrame:
+    """Fetch and store each month's time series up to `until`; write the fingerprint table.
+
+    Months already stored are fingerprinted from disk, not fetched again, so an interrupted
+    run resumes where it stopped. The table is rewritten after every month. Progress lines
+    report counts only.
+    """
+    rows = []
+    for month, start, end in series_windows(first, last, until):
+        path = series_path(data_root, site, month)
+        if path.exists():
+            items = read_series(data_root, site, month)
+            note = "already stored"
+        else:
+            items = fetch_series_window(site, start, end, get)
+            save_series(data_root, site, month, items)
+            note = "fetched"
+        rows.append(
+            {
+                "month": month,
+                "start_utc": start.strftime("%Y-%m-%d %H:%M"),
+                "end_utc": end.strftime("%Y-%m-%d %H:%M"),
+                "sessions": len(items),
+                "sha256": fingerprint(items),
+            }
+        )
+        write_fingerprints(fingerprint_dir, f"{site}-series", pd.DataFrame(rows))
+        progress(f"{site} series {month}: {len(items)} sessions ({note})")
+    return pd.DataFrame(rows, columns=["month", "start_utc", "end_utc", "sessions", "sha256"])
+
+
+def fetch_series_sessions(
+    site: str,
+    sessions: pd.DataFrame,
+    name: str,
+    *,
+    data_root: Path,
+    fingerprint_dir: Path,
+    get: Getter,
+    progress: Callable[[str], None] = print,
+) -> pd.DataFrame:
+    """Fetch the time series of each listed session (``session_id``, UTC ``connect_time``).
+
+    One request per session, by a one-second window on its plug-in time; the record whose
+    ``sessionID`` matches is kept. Stored as ``<name>`` with a one-row fingerprint table.
+    """
+    items = []
+    for k, row in enumerate(sessions.itertuples(index=False), start=1):
+        start = pd.Timestamp(row.connect_time).tz_convert("UTC").floor("s")
+        found = fetch_series_window(site, start, start + pd.Timedelta(seconds=1), get)
+        match = [item for item in found if str(item.get("sessionID")) == str(row.session_id)]
+        if len(match) != 1:
+            raise FetchError(f"{site}: {len(match)} time-series records for one listed session")
+        items.append(match[0])
+        if k % 50 == 0 or k == len(sessions):
+            progress(f"{site} series {name}: {k} of {len(sessions)} sessions")
+    save_series(data_root, site, name, items)
+    table = pd.DataFrame([{"name": name, "sessions": len(items), "sha256": fingerprint(items)}])
+    write_fingerprints(fingerprint_dir, f"{site}-series-{name}", table)
+    return table
+
+
+def verify_series(
+    data_root: Path, fingerprint_dir: Path, table_name: str, site: str
+) -> pd.DataFrame:
+    """Recompute stored time-series fingerprints against a committed table."""
+    expected = pd.read_csv(Path(fingerprint_dir) / f"{table_name}.csv", dtype=str)
+    key = "month" if "month" in expected.columns else "name"
+    found = []
+    for name in expected[key]:
+        path = series_path(data_root, site, name)
+        sha = fingerprint(read_series(data_root, site, name)) if path.exists() else None
+        found.append({key: name, "found_sha256": sha})
+    report = expected.merge(pd.DataFrame(found), on=key)
     report["matches"] = report["sha256"] == report["found_sha256"]
     return report
 

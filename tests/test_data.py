@@ -224,3 +224,76 @@ def test_hours_round_trip():
     times = pd.Series(pd.to_datetime(["2019-03-10 09:15:30", "2021-09-14 23:59:59"], utc=True))
     back = data.from_hours(data.to_hours(times))
     assert np.abs((back - pd.DatetimeIndex(times)).total_seconds()).max() < 1e-3
+
+
+# Per-session time series.
+
+
+def series_record(
+    session_id="s1", stamps=None, current=None, connect="Mon, 03 Jun 2019 15:00:00 GMT"
+):
+    stamps = stamps or [
+        "Mon, 03 Jun 2019 15:00:00 GMT",
+        "Mon, 03 Jun 2019 15:30:00 GMT",
+        "Mon, 03 Jun 2019 16:00:00 GMT",
+    ]
+    return {
+        "_id": f"ts-{session_id}",
+        "sessionID": session_id,
+        "connectionTime": connect,
+        "chargingCurrent": {"timestamps": stamps, "current": current or [10.0, 20.0, 5.0]},
+    }
+
+
+def test_energy_holds_each_sample_until_the_next():
+    series, reason = data.parse_series(series_record())
+    assert reason == "usable"
+    # 10 A for half an hour, then 20 A for half an hour, at 208 V; nothing after the last.
+    assert data.energy_kwh(series) == pytest.approx((10 * 0.5 + 20 * 0.5) * 208 / 1000)
+    start = series.times_h[0] + 0.25
+    assert data.energy_kwh(series, start_h=start) == pytest.approx((10 * 0.25 + 20 * 0.5) * 0.208)
+    assert data.energy_kwh(series, end_h=start) == pytest.approx(10 * 0.25 * 0.208)
+    negative, _ = data.parse_series(series_record(current=[-1.0, 20.0, 5.0]))
+    assert data.energy_kwh(negative) == pytest.approx(20 * 0.5 * 0.208)
+
+
+@pytest.mark.parametrize(
+    ("change", "reason"),
+    [
+        (lambda r: r.pop("chargingCurrent"), "no_series"),
+        (lambda r: r["chargingCurrent"].update(current=[1.0, 2.0]), "length_mismatch"),
+        (
+            lambda r: r["chargingCurrent"].update(
+                timestamps=["Mon, 03 Jun 2019 15:00:00 GMT"], current=[1.0]
+            ),
+            "too_short",
+        ),
+        (lambda r: r["chargingCurrent"]["timestamps"].__setitem__(1, "not a time"), "bad_time"),
+        (
+            lambda r: r["chargingCurrent"]["timestamps"].__setitem__(
+                2, "Mon, 03 Jun 2019 15:30:00 GMT"
+            ),
+            "not_increasing",
+        ),
+        (lambda r: r["chargingCurrent"]["current"].__setitem__(1, None), "bad_current"),
+        (lambda r: r["chargingCurrent"]["current"].__setitem__(1, float("nan")), "bad_current"),
+    ],
+)
+def test_unusable_series_are_named(change, reason):
+    record = series_record()
+    change(record)
+    series, why = data.parse_series(record)
+    assert series is None and why == reason
+    assert why in data.SERIES_REASONS
+
+
+def test_stored_series_keep_the_seals(tmp_path):
+    before = series_record("s1", connect="Sat, 29 Feb 2020 20:00:00 GMT")
+    after = series_record("s2", connect="Sun, 01 Mar 2020 09:00:00 GMT")
+    acn.save_series(tmp_path, "caltech", "2020-02", [before])
+    acn.save_series(tmp_path, "caltech", "2020-03", [after])
+    acn.save_series(tmp_path, "caltech", "named", [before, after])
+    assert [r["sessionID"] for r in data.load_series(tmp_path, "caltech")] == ["s1"]
+    assert [r["sessionID"] for r in data.load_series(tmp_path, "caltech", "named")] == ["s1"]
+    with pytest.raises(data.SealedSiteError):
+        data.load_series(tmp_path, "jpl")

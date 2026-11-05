@@ -79,7 +79,7 @@ Statements below are taken from the papers' texts, with their numbering, and are
 
 ## 7. Data
 
-**Source.** Caltech ACN-Data (Lee, Li and Low, 2019): the Caltech campus car park (54 charging points) and the Jet Propulsion Laboratory (JPL) workplace site, available for educational and research use after registration; not redistributed. Session fields: plug-in, charging-done and unplug times, energy delivered, station, a driver identifier where the driver used the app, and the driver's typed plan with its timestamp. Energy delivered after 10:00 and the pilot signal are not fields of the session record: they come from the charging-current and pilot-signal time series, which the API serves from its time-series endpoint, one session per request. The download, its coverage by month, and the rule for sessions without a usable series are part of `docs/data.md` and of Section 10a (D1).
+**Source.** Caltech ACN-Data (Lee, Li and Low, 2019): the Caltech campus car park (54 charging points) and the Jet Propulsion Laboratory (JPL) workplace site, available for educational and research use after registration; not redistributed. Session fields: plug-in, charging-done and unplug times, energy delivered, station, a driver identifier where the driver used the app, and the driver's typed plan with its timestamp. Energy delivered after 10:00 and the pilot signal are not fields of the session record: they come from the charging-current and pilot-signal time series, which the API serves from its time-series endpoint, a few sessions per request. The download, its coverage by month, and the rule for sessions without a usable series are part of `docs/data.md` and of Section 10a (D1).
 
 **Development data: Caltech, 25 April 2018 to 29 February 2020.** 27,584 sessions and 483 calendar weekdays; the number of scored weekdays (at least five present cars with energy remaining) is counted and reported. The shares of sessions linked to a driver by 10:00 and with a typed plan recorded before 10:00 are recomputed here with their definitions (figures reported earlier, 47% and 46%, came from a prior look and are not treated as verified). This period contains a real change that is not sealed: charging became paid for claimed sessions on 1 November 2018, after which the evening community peak vanished (Lee, Li and Low, 2019). The method is trained across that change and evaluated on the months that follow it. Within the period: training through April 2019; model selection May to August 2019 (88 weekdays; settings frozen at its end; these months also warm up the day-level calibration); frozen development evaluation September 2019 to February 2020 (130 weekdays), on which H1 and H4 are scored with day-level calibration using only earlier days and on which the end-to-end pipeline is rehearsed. Nothing in the frozen evaluation chooses a setting.
 
@@ -146,4 +146,8 @@ Kept from the earlier repository: the ACN-Data download with month fingerprints 
 
 ## Change log
 
-Changes to this plan before the `analysis-plan` tag, each with its reason. None so far.
+Changes to this plan before the `analysis-plan` tag, each with its reason.
+
+- Section 7: the time-series endpoint was described as serving one session per request. It
+  serves sessions in pages of a chosen size, like the session endpoint; records are large, so
+  pages of 10 are used. Correction of fact; nothing in the design changes.

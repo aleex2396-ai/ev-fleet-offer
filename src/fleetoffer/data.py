@@ -23,6 +23,13 @@ descriptive flags about it (claimed by a known driver, typed entry recorded at t
 as the plug-in, typed stay of exactly 60 or 480 minutes); they describe how the data were
 recorded and are not used to drop anything.
 
+Per-session time series give the charging current at about four-second intervals.
+`parse_series` checks a record against the usability rule of check D1 (analysis plan,
+Section 10a) and `energy_kwh` integrates the current: each sample's current, negative values
+counted as zero, holds until the next sample, and nothing is counted after the last one.
+Power is current times the line voltage, `VOLTS` (208 V at Caltech, where a 32 A charger is
+the plan's 6.66 kW).
+
 Two parts of the data are sealed, so the public history shows they were not read before the
 analysis was fixed:
 
@@ -35,14 +42,16 @@ analysis was fixed:
 
 from __future__ import annotations
 
+import math
 import subprocess
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
-from fleetoffer.acn import months_between, raw_path, read_month
+from fleetoffer.acn import months_between, raw_path, read_month, read_series, series_path
 
 SEALED_SITES = frozenset({"jpl"})
 TEST_PERIODS = {"caltech": pd.Timestamp("2020-03-01", tz="America/Los_Angeles")}
@@ -304,3 +313,92 @@ def stay_hours(table: pd.DataFrame) -> np.ndarray:
 
 def missing_months(data_root: Path, site: str, first: str, last: str) -> list[str]:
     return [m for m in months_between(first, last) if not raw_path(data_root, site, m).exists()]
+
+
+# Per-session time series.
+
+VOLTS = 208.0
+SERIES_REASONS = (
+    "usable",
+    "no_series",
+    "too_short",
+    "length_mismatch",
+    "bad_time",
+    "not_increasing",
+    "bad_current",
+)
+
+
+@dataclass(frozen=True)
+class Series:
+    """One session's charging current: sample times (hours since 1970 UTC) and amperes."""
+
+    session_id: str
+    times_h: np.ndarray
+    amps: np.ndarray
+
+
+def parse_series(record: dict) -> tuple[Series | None, str]:
+    """The session's current series and ``"usable"``, or None and the reason it is not.
+
+    Usable means: a ``chargingCurrent`` with as many timestamps as values, at least two of
+    each, every timestamp readable and strictly later than the one before, and every value a
+    finite number. The rule is the one fixed for check D1 before any series was examined.
+    """
+    session_id = str(record.get("sessionID"))
+    current = record.get("chargingCurrent")
+    if not isinstance(current, dict):
+        return None, "no_series"
+    stamps, values = current.get("timestamps") or [], current.get("current") or []
+    if len(stamps) != len(values):
+        return None, "length_mismatch"
+    if len(stamps) < 2:
+        return None, "too_short"
+    times = pd.to_datetime(pd.Series(stamps, dtype=object), format=_TIME, utc=True, errors="coerce")
+    if times.isna().any():
+        return None, "bad_time"
+    times_h = to_hours(times)
+    if not (np.diff(times_h) > 0).all():
+        return None, "not_increasing"
+    try:
+        amps = np.array([float(v) for v in values], dtype=float)
+    except (TypeError, ValueError):
+        return None, "bad_current"
+    if not np.isfinite(amps).all():
+        return None, "bad_current"
+    return Series(session_id, times_h, amps), "usable"
+
+
+def energy_kwh(
+    series: Series, start_h: float = -math.inf, end_h: float = math.inf, volts: float = VOLTS
+) -> float:
+    """Energy delivered between `start_h` and `end_h`, holding each sample until the next."""
+    t = series.times_h
+    lo = np.clip(t[:-1], start_h, end_h)
+    hi = np.clip(t[1:], start_h, end_h)
+    amps = np.maximum(series.amps[:-1], 0.0)
+    return float(np.sum(amps * (hi - lo)) * volts / 1000.0)
+
+
+def load_series(
+    data_root: Path, site: str, name: str | None = None, *, unseal: bool = False
+) -> list[dict]:
+    """Stored time-series records: every stored month, or the one named file.
+
+    The seals of `load_items` apply: the replication site is refused, and Caltech records
+    from its main test period are dropped unless it is unsealed after the plan's tag.
+    """
+    if site in SEALED_SITES and not unseal:
+        raise SealedSiteError(f"{site} is the sealed replication site")
+    start = TEST_PERIODS.get(site)
+    if start is not None and unseal and not plan_is_tagged():
+        raise SealedPeriodError(f"{site} series from {start:%d %B %Y} open only after the tag")
+    if name is not None:
+        items = read_series(data_root, site, name)
+    else:
+        folder = series_path(data_root, site, "x").parent
+        months = sorted(p.name.removesuffix(".json.gz") for p in folder.glob("????-??.json.gz"))
+        items = [item for month in months for item in read_series(data_root, site, month)]
+    if start is not None and not unseal:
+        items = [item for item in items if _plugged_in_before(item, start)]
+    return items
