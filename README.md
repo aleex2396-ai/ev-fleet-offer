@@ -59,13 +59,12 @@ src/fleetoffer/
   acn.py          ACN-Data download, sessions and per-session time series, with fingerprints
   data.py         sessions table, cleaning rules, seals
   interface.py    what a model may see at the decision time
-  engine.py       event-by-event replay; the only reader of unplug times
+  engine.py       replay per car and per day; the only reader of unplug times
   features.py     inputs known at 10:00, from sessions that had ended
   models.py       quantile models and baselines
-  sets.py         per-car flexibility sets from bounds
-  aggregate.py    the inner-approximation programme and the affine allocation
+  offer.py        per-car sets, the inner-approximation programme, the affine allocation,
+                  the nine-profile delivery checks and the one-dimensional fallback
   calibrate.py    union bound, day-level conformal, adaptive conformal
-  deliver.py      the nine-profile delivery checks and shortfalls
   checks.py       the look-ahead scramble test, per car and per day
   synthetic.py    made-up fleets with known flexibility sets
   figures.py      figures, each drawn from a table also written to disk

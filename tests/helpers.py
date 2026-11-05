@@ -6,7 +6,16 @@ import numpy as np
 import pandas as pd
 
 from fleetoffer.data import to_hours
-from fleetoffer.interface import History, Outcome, Request, Rule
+from fleetoffer.engine import energy_in_window
+from fleetoffer.interface import (
+    DayOutcome,
+    DayView,
+    FleetRule,
+    History,
+    Outcome,
+    Request,
+    Rule,
+)
 
 T0 = pd.Timestamp("2001-01-01 00:00", tz="UTC")
 
@@ -113,3 +122,78 @@ class QuantileOfEverything(Rule):
 
     def bound(self, request: Request, history: History) -> float:
         return self.hours
+
+
+# Day-level rules used only by tests.
+
+
+class FleetPast(FleetRule):
+    """Lower quantiles of stays and energy totals of sessions ended in the last 28 days,
+    shrunk by a factor that falls each time an observed day had a failed bound. Records
+    what it saw so tests can check the order in which things became known."""
+
+    name = "past quantiles"
+
+    def __init__(self, level: float = 0.2) -> None:
+        self.level = level
+        self.scale = 1.0
+        self.seen: list[tuple[pd.Timestamp, list[DayOutcome]]] = []
+        self.observed: list[DayOutcome] = []
+
+    def bounds(self, day: DayView):
+        self.seen.append((day.decision_time, list(self.observed)))
+        recent = day.ended[day.ended["connect_time"] >= day.decision_time - pd.Timedelta(days=28)]
+        n = len(day.present)
+        if len(recent) < 5:
+            return np.zeros(n), np.zeros(n)
+        stays = (recent["disconnect_time"] - recent["connect_time"]) / pd.Timedelta(hours=1)
+        stay = float(np.quantile(stays, self.level))
+        energy = float(np.quantile(recent["kwh_delivered"], self.level)) * 0.5
+        remaining = np.maximum(stay - day.present["elapsed_h"].to_numpy(), 0.0)
+        return self.scale * remaining, np.full(n, self.scale * energy)
+
+    def observe(self, outcome: DayOutcome) -> None:
+        self.observed.append(outcome)
+        failed = (outcome.learned_deadline > outcome.true_deadline) | (
+            outcome.learned_energy > outcome.true_energy
+        )
+        if failed.any():
+            self.scale *= 0.8
+
+
+class FleetOracle(FleetRule):
+    """Reads each present car's true remaining stay and energy: not a rule, a reference."""
+
+    name = "oracle"
+
+    def __init__(self, sessions: pd.DataFrame) -> None:
+        self.table = sessions.set_index("session_id")
+
+    def bounds(self, day: DayView):
+        rows = self.table.loc[day.present["session_id"]]
+        t = to_hours(pd.Series([day.decision_time]))[0]
+        stay = to_hours(rows["disconnect_time"]) - t
+        energy = energy_in_window(
+            to_hours(rows["connect_time"]),
+            to_hours(rows["done_charging_time"]),
+            to_hours(rows["disconnect_time"]),
+            rows["kwh_delivered"].to_numpy(float),
+            t,
+            t + 10.0,
+        )
+        return stay, energy
+
+
+class FleetPeekEnergy(FleetPast):
+    """Like FleetPast, but adds a sliver of each present car's recorded total: look-ahead."""
+
+    name = "peeks at energy"
+
+    def __init__(self, sessions: pd.DataFrame) -> None:
+        super().__init__()
+        self.table = sessions.set_index("session_id")
+
+    def bounds(self, day: DayView):
+        stay, energy = super().bounds(day)
+        totals = self.table.loc[day.present["session_id"], "kwh_delivered"].to_numpy(float)
+        return stay, energy + 1e-3 * totals

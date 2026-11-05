@@ -23,9 +23,9 @@ from collections.abc import Callable
 import numpy as np
 import pandas as pd
 
-from fleetoffer.data import validate_sessions
-from fleetoffer.engine import Daily, replay
-from fleetoffer.interface import Rule
+from fleetoffer.data import from_hours, to_hours, validate_sessions
+from fleetoffer.engine import MORNING, Daily, fleet_replay, replay
+from fleetoffer.interface import FleetRule, Rule
 
 
 class LookaheadError(AssertionError):
@@ -49,6 +49,20 @@ def scramble_future(sessions: pd.DataFrame, cutoff: pd.Timestamp, *, seed: int =
     redraw = np.where(soon, rng.uniform(0.0, 0.05, n_later), rng.uniform(12.0, 48.0, n_later))
     table.loc[later, "disconnect_time"] = floor + pd.to_timedelta(redraw + 1e-4, unit="h")
 
+    # Fields recorded at or after the cutoff are re-drawn too: the energy total (recorded at
+    # unplug) of every session still plugged in, and a charging-done time or driver link not
+    # yet recorded, each moved to between the cutoff and the new unplug time.
+    if "kwh_delivered" in table.columns:
+        table.loc[later, "kwh_delivered"] = rng.uniform(30.0, 60.0, n_later)
+    for col in ("done_charging_time", "linked_time"):
+        if col in table.columns:
+            unknown = later & ~(table[col] < cutoff)
+            start = table.loc[unknown, "connect_time"].where(
+                table.loc[unknown, "connect_time"] > cutoff, cutoff
+            )
+            span = table.loc[unknown, "disconnect_time"] - start
+            table.loc[unknown, col] = start + span * rng.uniform(0.0, 1.0, int(unknown.sum()))
+
     # Half of the sessions that plug in at or after the cutoff are dropped and more made-up
     # ones are added than were dropped, so the number of later sessions changes too.
     future = table.index[table["connect_time"] >= cutoff]
@@ -65,6 +79,15 @@ def scramble_future(sessions: pd.DataFrame, cutoff: pd.Timestamp, *, seed: int =
             "user_id": [f"scrambled-user-{k % 7}" for k in range(n_new)],
         }
     )
+    if "kwh_delivered" in table.columns:
+        added["kwh_delivered"] = rng.uniform(30.0, 60.0, n_new)
+    if "done_charging_time" in table.columns:
+        span = added["disconnect_time"] - added["connect_time"]
+        added["done_charging_time"] = added["connect_time"] + span * rng.uniform(0.1, 1.0, n_new)
+    if "linked_time" in table.columns:
+        added["linked_time"] = added["connect_time"]
+    if "station_id" in table.columns:
+        added["station_id"] = "scrambled-station"
     combined = pd.concat([table, added], ignore_index=True)
     return validate_sessions(combined) if len(combined) else combined
 
@@ -132,3 +155,60 @@ def _check_one_cutoff(rule_factory, sessions, cutoff, *, every_h, daily, seed) -
             f"the future changed; first: session {first.session_id} at {first.decision_time}"
         )
     return len(a)
+
+
+def default_day_cutoffs(sessions: pd.DataFrame, daily: Daily, count: int = 4) -> list[pd.Timestamp]:
+    """Cutoffs at decision days spread over the data: alternately four hours after the
+    decision (that day's cars still plugged in, its outcome unknown) and one hour before it
+    (earlier days' outcomes possibly still pending)."""
+    table = validate_sessions(sessions)
+    times = daily.times_h(
+        float(to_hours(table["connect_time"]).min()),
+        float(to_hours(table["disconnect_time"]).max()),
+    )
+    picks = times[(np.linspace(0.3, 0.9, count) * (len(times) - 1)).astype(int)]
+    shifts = [4.0 if k % 2 == 0 else -1.0 for k in range(count)]
+    return [from_hours([t + s])[0] for t, s in zip(picks, shifts, strict=True)]
+
+
+def check_no_lookahead_days(
+    rule_factory: Callable[[pd.DataFrame], FleetRule],
+    sessions: pd.DataFrame,
+    cutoffs: list[pd.Timestamp] | None = None,
+    *,
+    seed: int = 0,
+    **fleet_options,
+) -> int:
+    """Raise `LookaheadError` if any offer made before a cutoff depends on what follows it.
+
+    The day-level version of the check (analysis plan, Section 7): the whole pipeline is run
+    on the real table and on a copy scrambled after the cutoff, linear programme included,
+    and every day before the cutoff must have the same cars, the same per-car bounds and the
+    same programme output to the last bit. Returns the number of days compared.
+    """
+    daily = fleet_options.get("daily", MORNING)
+    cutoffs = default_day_cutoffs(sessions, daily) if cutoffs is None else cutoffs
+    compared = 0
+    for k, cutoff in enumerate(cutoffs):
+        real = validate_sessions(sessions)
+        scrambled = scramble_future(real, cutoff, seed=seed + k)
+        cutoff = pd.Timestamp(cutoff).tz_convert("UTC")
+        a, b = (
+            fleet_replay(table, rule_factory(table), **fleet_options) for table in (real, scrambled)
+        )
+        days_a, days_b = (r.days[r.days["decision_time"] < cutoff] for r in (a, b))
+        cars_a, cars_b = (r.cars[r.cars["decision_time"] < cutoff] for r in (a, b))
+        day_cols = ["decision_time", "cars", "digest"]
+        car_cols = ["decision_time", "session_id", "learned_deadline", "learned_energy_kwh"]
+        same_days = (
+            days_a[day_cols].reset_index(drop=True).equals(days_b[day_cols].reset_index(drop=True))
+        )
+        same_cars = (
+            cars_a[car_cols].reset_index(drop=True).equals(cars_b[car_cols].reset_index(drop=True))
+        )
+        if not (same_days and same_cars):
+            raise LookaheadError(
+                f"an offer made before {cutoff} changed when only later data changed"
+            )
+        compared += len(days_a)
+    return compared

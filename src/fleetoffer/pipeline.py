@@ -22,8 +22,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from fleetoffer import __version__, acn, calibrate, data
-from fleetoffer.engine import Daily, energy_in_window, replay
+from fleetoffer import __version__, acn, calibrate, data, offer
+from fleetoffer.engine import Daily, Oracle, energy_in_window, fleet_replay, replay
 from fleetoffer.figures import plot_monthly
 from fleetoffer.models import FrozenQuantile, RollingQuantile
 from fleetoffer.synthetic import Regime, demo_regimes, make_sessions
@@ -31,6 +31,7 @@ from fleetoffer.synthetic import Regime, demo_regimes, make_sessions
 DEMO_TZ = "America/Los_Angeles"
 DEMO_LEVEL = 0.1
 DECISION = Daily(at="10:00", tz=DEMO_TZ)
+DEMO_FLEET_DAYS = 14  # calendar days of made-up data on which the oracle's offer is checked
 
 # The months each site has sessions in the public API (checked 4 Nov 2026).
 SITE_MONTHS = {"caltech": ("2018-04", "2021-09"), "jpl": ("2018-09", "2021-09")}
@@ -95,7 +96,9 @@ def run_demo(
     """Run the pipeline on made-up fleets. This checks the plumbing; it is not a result.
 
     Every weekday at 10:00, each car plugged in is given a lower bound on its remaining stay
-    by each rule, and the bound is scored by replay.
+    by each rule, and the bound is scored by replay. Over the first two weeks, the fleet's
+    offer is also built from each car's true set (the oracle) and checked, where the answer
+    is known: every day must be delivered and no offer may exceed the exact band.
     """
     out = Path(out)
     out.mkdir(parents=True, exist_ok=True)
@@ -111,12 +114,25 @@ def run_demo(
     monthly = monthly_summary(decisions, tz=DEMO_TZ)
     overall = overall_summary(decisions)
     days = fleet_days(decisions, DEMO_TZ)
+    first = sessions["connect_time"].min()
+    early = sessions[sessions["connect_time"] < first + pd.Timedelta(days=DEMO_FLEET_DAYS)]
+    offers = fleet_replay(early, Oracle(), daily=DECISION).days
+    scored = offers[offers["cars"] > 0]
+    fleet_check = {
+        "days": len(scored),
+        "delivered_share_fixed": float(scored["fixed_delivered"].mean()),
+        "delivered_share_hindsight": float(scored["hindsight_delivered"].mean()),
+        "median_alpha": float(scored["alpha"].median()),
+        "median_size_over_exact": float((scored["size_kwh"] / scored["exact_true_kwh"]).median()),
+        "solver": offer.SOLVER,
+    }
 
     sessions.to_csv(out / "sessions.csv", index=False)
     decisions.to_csv(out / "decisions.csv.gz", index=False)
     monthly.to_csv(out / "monthly.csv", index=False)
     overall.to_csv(out / "overall.csv", index=False)
     days.to_csv(out / "fleet_days.csv", index=False)
+    offers.to_csv(out / "fleet_offers.csv", index=False)
     figure = plot_monthly(
         monthly,
         DEMO_LEVEL,
@@ -148,6 +164,7 @@ def run_demo(
         "inputs": {"sessions.csv": _sha256(out / "sessions.csv"), "sessions": len(sessions)},
         "outputs": sorted(p.name for p in out.iterdir() if p.name != "manifest.json"),
         "figure": figure.name,
+        "fleet_check": fleet_check,
     }
     (out / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     return manifest

@@ -100,6 +100,77 @@ approximation is measured. The exact aggregate set for this class of sets, not o
 is a generalised polymatroid (Mukhi, Loho and Abate, IEEE Transactions on Smart Grid 17(3),
 2026).
 
+## How programme (24) is solved
+
+The conditions of Theorem 2 are Lemma 1 of the 2024 paper applied to each car, and Lemma 1 is
+necessary and sufficient for γᵢ + ΓᵢU₀ ⊆ Uᵢ whatever half-space description is used for U₀
+and Uᵢ. `offer.solve` therefore writes each set with irredundant rows (its power box and one
+row on total energy, 2K + 1 rows instead of the 4K of H = (L, −L, I, −I)) and, for each row,
+Lemma 1's multipliers as the dual of maximising that row over U₀. The feasible values of p,
+α, γᵢ and Γᵢ, and so the optimal α, are those of (24) as printed; `tests/test_offer.py` solves
+(24) as printed on small fleets and compares. Rows and columns that a car's set or U₀ fixes at
+zero are dropped. The solver is HiGHS's interior-point method with crossover (through SciPy);
+the allocation (31) is the optimal γᵢ and Γᵢ it returns. On made-up fleets of 40 cars over 40
+steps the programme took about 10 seconds (computed).
+
+**The car's vector in the base set.** Equation (11) averages the cars' vectors hᵢ, so it
+depends on how each set is written, not only on the set. Here each car's power limit is the
+tightest its set implies, min(c, e/δ) up to its deadline: no single step can take more than
+the whole ceiling. With the cap alone, a car with no energy left that stays late would give U₀
+charging capacity at hours no car can use, and the next statement would force α to 0.
+
+## When the offer is zero
+
+**Statement.** If at some step k the base set can charge (the k-th entry of its power vector
+is positive) and every present car's set forces u_k = 0 (its deadline is before k, or its
+ceiling is zero), the optimal α of (24) is 0.
+
+*Proof.* For such a car, γᵢ + Γᵢu₀ must have k-th entry 0 for every u₀ in U₀. At u₀ = 0 this
+gives (γᵢ)_k = 0; U₀ contains small multiples of the k-th unit vector, so (Γᵢ)_kk = 0. Then
+the (k, k) entry of Σ Γᵢ = αI gives α = 0. ∎
+
+The day-average base set of equation (11) cannot meet this case, since its power vector is
+zero wherever no car can charge. A base set fixed from the training period can: on any day on
+which no present car's learned set reaches a late step at which training cars could charge,
+the offer is the single profile p. How often this happens is measured for every arm on
+development data before the tag, beside the paper's own day-average base set.
+
+## How a day's offer is checked
+
+The nine profiles drawn from p + αU₀ (analysis plan, Section 3) are p + αu₀ for these points
+u₀ of U₀ (`offer.checked_profiles`). For each checkpoint t (12:00, 14:00, 16:00, 18:00), many
+points reach the most and the least cumulative energy by t; the pair checked moves as much
+energy across t as it can: one charges as much as it can before t, earliest first, and nothing
+after; the other charges nothing before t and as much as it can after, earliest first. The
+ninth is the least-cost profile under a stylised time-of-use tariff (relative prices: 1 from
+11:00 to 15:00, 2 from 10:00 to 11:00 and 15:00 to 16:00, 4 from 16:00 to 20:00) among the
+points that deliver U₀'s largest total energy, cheapest steps first and earliest first among
+equal prices; without that condition the least-cost point is zero, whose profile is p itself.
+
+**Primary check.** Each car is given its allocation (31) for each profile and follows it as
+far as its true set allows: no more than its true power limit at each step and its true
+ceiling in total. The shortfall is the energy left over, summed over cars; the day counts as
+delivered if, for all nine profiles, it is at most 10⁻⁴ kWh (`offer.DELIVERY_TOL_KWH`, a
+rounding tolerance). **Secondary check.** The largest energy the cars actually present can
+take, each within its true set, with their total power at no step above the profile's; the
+shortfall is the profile's energy minus that. It is zero exactly when the profile can be split
+among the cars, and it is never above the primary shortfall.
+
+**When a day's outcome is known.** The outcome is defined within the horizon, but the energy a
+car took between 10:00 and 20:00 is estimated from its recorded total (`docs/data.md`, check
+D1), which is known only at unplug. So a day is passed to the day-level rules once its last
+car has unplugged, at 20:00 at the earliest; a car that stays overnight delays it past the
+next decision. The scramble test checks this ordering.
+
+**The one-dimensional fallback** (used only if check D9 calls for it) is the segment b + a·v,
+|a| ≤ A, with the shape v moving charging out of 10:00–11:00 (−1 kW per kW of amplitude) and
+into 11:00–13:00 (+0.5). The reference b sums each car's flat half profile, half of
+min(c, e/(δd)) up to its deadline, which lies inside its set with room either way. A linear
+programme finds the largest A for which per-car shifts wᵢ, adding up to A·v, keep both
+bᵢ + wᵢ and bᵢ − wᵢ in every car's set; by convexity every a in between is covered, and car i
+is allocated bᵢ + (a/A)wᵢ. Its size is A, in kWh moved out of or into 10:00–11:00. It is
+checked on its two ends and its reference, by the same two checks.
+
 ## Day-level calibration under drift: Yan, Parise and Bitar (2022)
 
 Yan, Parise and Bitar, "Data-driven approximations of chance constrained programs in
@@ -183,7 +254,7 @@ this result as the one that would apply if its assumptions held.
 | Enough days (Theorem 4) | 483 weekdays in development (computed), so 312 is met and 1,121 missed by 638; a calendar year has 261 weekdays (computed), about 250 once holidays are removed; 182 in 2021 (computed) | Met at the first setting on development data only |
 | A fixed finite decision set (Theorem 4) | The offer is fitted continuously from the day's cars | Not met; a grid of 101 scales is the closest reading |
 | Exchangeable days (split conformal) | The closure and the 2021 reopening break exchangeability | Its 90% is an empirical target across the change |
-| Each outcome known before the next decision (adaptive conformal) | A day's outcome is defined within the horizon, so it is known by 20:00 | Met by construction |
+| Each outcome known before the next decision (adaptive conformal) | A day's outcome uses each car's recorded energy total, known only at unplug (check D1's fallback), so a car that stays overnight delays it past the next decision | Not met on every day; the share of days whose outcome is known before the next decision is reported, and the rule is updated as outcomes arrive |
 
 So the day-level rate in this project rests on a calibration rule over past days or on a
 union bound across cars; the requirements of the 2022 theorem are reported beside the days

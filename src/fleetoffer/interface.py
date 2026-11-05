@@ -21,6 +21,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import numpy as np
+import pandas as pd
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,4 +117,61 @@ class Rule:
         raise NotImplementedError
 
     def observe(self, outcome: Outcome) -> None:
+        return None
+
+
+# The day level: one decision a day for the whole fleet present at that moment.
+
+
+@dataclass(frozen=True)
+class DayView:
+    """What is known at a day's decision time, as given to a fleet rule.
+
+    ``present`` has one row per car plugged in at the decision time, with only what is known
+    then: ``session_id``, ``connect_time``, ``elapsed_h``, ``station_id`` and ``space_id``
+    where the table has them, and ``user_id`` only where the link to the driver was recorded
+    before the decision time (a ``linked_time`` column; without one, no link is shown).
+    ``ended`` holds every session that had ended before the decision time, with all its
+    fields, and ``user_id`` shown on the same condition.
+    """
+
+    decision_time: pd.Timestamp
+    present: pd.DataFrame
+    ended: pd.DataFrame
+
+
+@dataclass(frozen=True)
+class DayOutcome:
+    """A day's per-car bounds against what happened, given to the rule once all is known.
+
+    Deadlines are in steps of the horizon, energies in kWh between the decision time and the
+    end of the horizon. ``revealed_at`` is when the last input to the outcome became known:
+    the end of the horizon, or the latest unplug among the day's cars if later, because the
+    energy estimate uses each session's recorded total (`docs/data.md`, check D1).
+    """
+
+    decision_time: pd.Timestamp
+    session_id: np.ndarray
+    learned_deadline: np.ndarray
+    learned_energy: np.ndarray
+    true_deadline: np.ndarray
+    true_energy: np.ndarray
+    revealed_at: pd.Timestamp
+
+
+class FleetRule:
+    """Base class for a day-level rule: per-car bounds for every car present at 10:00.
+
+    `bounds` returns two arrays in the order of ``day.present``: a lower bound on each car's
+    remaining stay in hours and a lower bound on the energy it will take before the end of
+    the horizon in kWh (both finite and at least 0). `observe` receives each earlier day's
+    outcome once it is known.
+    """
+
+    name: str = "fleet rule"
+
+    def bounds(self, day: DayView) -> tuple[np.ndarray, np.ndarray]:
+        raise NotImplementedError
+
+    def observe(self, outcome: DayOutcome) -> None:
         return None

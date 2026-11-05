@@ -32,12 +32,19 @@ def test_demo_writes_every_output_and_a_manifest(tmp_path):
         "monthly.csv",
         "overall.csv",
         "fleet_days.csv",
+        "fleet_offers.csv",
         "monthly.png",
     ]
     for name in outputs:
         assert (tmp_path / name).stat().st_size > 0
     on_disk = json.loads((tmp_path / "manifest.json").read_text())
     assert on_disk["parameters"]["seed"] == 0
+
+    # The oracle's offer, built from true sets, is delivered every day and within the band.
+    check = on_disk["fleet_check"]
+    assert check["days"] >= 9
+    assert check["delivered_share_fixed"] == check["delivered_share_hindsight"] == 1.0
+    assert 0 < check["median_size_over_exact"] <= 1.0
     assert on_disk["inputs"]["sessions"] == manifest["inputs"]["sessions"] > 0
 
     # After the change, the frozen rule's bounds hold far less often than a rolling one's.

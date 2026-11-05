@@ -84,7 +84,30 @@ def make_sessions(
     table.insert(0, "session_id", [f"syn-{k:06d}" for k in range(len(table))])
     for col in ("connect_time", "disconnect_time"):
         table[col] = table[col].dt.tz_convert("UTC")
-    return table.reset_index(drop=True)
+    table = table.reset_index(drop=True)
+    return _add_energy(table, np.random.default_rng([seed, 1]))
+
+
+def _add_energy(table: pd.DataFrame, rng: np.random.Generator) -> pd.DataFrame:
+    """Energy, charging-done time, station and driver link, drawn after everything else so
+    the stays above do not depend on them.
+
+    Each car needs a log-normal amount of energy (median 8 kWh) and charges at a constant
+    rate (3 to 6.6 kW) from plug-in until it has it or leaves. Because the rate is constant,
+    spreading the recorded energy evenly from plug-in to charging-done, the estimate the
+    analysis uses (check D1), gives the energy in any window exactly. The driver link is
+    recorded at plug-in and the station is one of 54.
+    """
+    n = len(table)
+    need = np.clip(np.exp(rng.normal(np.log(8.0), 0.6, n)), 0.5, 60.0)
+    rate = rng.uniform(3.0, 6.6, n)
+    stay_h = (table["disconnect_time"] - table["connect_time"]) / pd.Timedelta(hours=1)
+    charge_h = np.minimum(need / rate, stay_h.to_numpy())
+    table["kwh_delivered"] = rate * charge_h
+    table["done_charging_time"] = table["connect_time"] + pd.to_timedelta(charge_h, unit="h")
+    table["linked_time"] = table["connect_time"]
+    table["station_id"] = [f"station-{k:02d}" for k in rng.integers(0, 54, n)]
+    return table
 
 
 def _arrival_hours(rng: np.random.Generator, n: int) -> np.ndarray:
