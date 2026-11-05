@@ -226,6 +226,7 @@ DAY_COLUMNS = [
     "rule",
     "decision_time",
     "cars",
+    "cars_with_energy",
     "method",
     "alpha",
     "size_kwh",
@@ -238,6 +239,8 @@ DAY_COLUMNS = [
     "hindsight_shortfall_kwh",
     "profile_energy_kwh",
     "solve_seconds",
+    "alpha_day_average",
+    "size_day_average_kwh",
     "revealed_at",
     "digest",
 ]
@@ -254,6 +257,7 @@ CAR_COLUMNS = [
 ]
 _KNOWN_ON_ARRIVAL = ("session_id", "connect_time", "station_id", "space_id")
 _ENERGY_TOL_KWH = 1e-9
+ENERGY_REMAINING_KWH = 0.5  # a car "has energy remaining" above this (check D3)
 
 
 class Oracle(FleetRule):
@@ -365,6 +369,8 @@ def fleet_replay(
     method: str = "programme",
     entries: pd.DataFrame | None = None,
     until: pd.Timestamp | None = None,
+    offers_from: pd.Timestamp | None = None,
+    day_average_too: bool = False,
     cap: float = CAP_KW,
     steps: int = STEPS,
     step_h: float = STEP_H,
@@ -379,7 +385,10 @@ def fleet_replay(
     fallback if `method` is "segment"); the offer is checked against the true sets. With
     `method` "bounds" no offer is made and only the per-car bounds are scored (the per-car
     layer). A day's outcome is passed to the rule once every input to it is known
-    (`DayOutcome`). Decisions stop before `until`, if given.
+    (`DayOutcome`). Decisions stop before `until`, if given. Before `offers_from`, if given,
+    the rule runs and learns but no offer is made (a warm-up). With `day_average_too`, the
+    programme is also solved on the day-average base set, and its α and size are recorded
+    beside those of `base`.
     """
     if method not in ("programme", "segment", "bounds"):
         raise ValueError("method must be 'programme', 'segment' or 'bounds'")
@@ -423,7 +432,10 @@ def fleet_replay(
             )
 
         offer = None
-        if method == "segment":
+        offering = offers_from is None or when >= offers_from
+        if not offering:
+            alpha, digest = np.nan, _digest(learned.deadline, learned.energy)
+        elif method == "segment":
             offer = solve_segment(learned)
             alpha, digest = np.nan, _digest(offer.amplitude, offer.b, offer.w)
         elif method == "programme":
@@ -442,6 +454,7 @@ def fleet_replay(
             "rule": rule.name,
             "decision_time": when,
             "cars": len(present),
+            "cars_with_energy": int((true.energy > ENERGY_REMAINING_KWH).sum()),
             "method": method,
             "alpha": alpha,
             "exact_true_kwh": float(np.mean([true.band_width(k) for k in sizes])),
@@ -450,6 +463,12 @@ def fleet_replay(
             "revealed_at": revealed_at,
             "digest": digest,
         }
+        if offer is not None and day_average_too and method == "programme":
+            average = solve(learned, BaseSet.average(learned)) if len(learned) else None
+            row |= {
+                "alpha_day_average": average.alpha if average else 0.0,
+                "size_day_average_kwh": average.size() if average else 0.0,
+            }
         if offer is not None:
             delivery = check_delivery(offer, true)
             row |= {

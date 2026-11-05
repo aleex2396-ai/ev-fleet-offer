@@ -26,6 +26,7 @@ import pandas as pd
 
 from fleetoffer import data
 from fleetoffer.baselines import DriverPast, Mixture, Population, Stratified, TypedPlan
+from fleetoffer.daylevel import at_levels, conformal_level, held_level
 from fleetoffer.engine import fleet_replay
 from fleetoffer.features import LOCAL_TZ
 from fleetoffer.offer import STEP_H
@@ -62,6 +63,14 @@ GRID = {
     ],
     "net": [{"hidden": h, "weight_decay": wd} for h in (16, 64) for wd in (1e-4, 1e-2)],
     "mixture_components": list(range(2, 9)),
+}
+# The settings the search chose on the internal split (`fleetoffer percar`, settings_search.csv),
+# committed so that later runs load them rather than search again.
+CHOSEN = {
+    "window_days": 90,
+    "gbdt": {"learning_rate": 0.1, "max_leaf_nodes": 7, "min_samples_leaf": 20},
+    "net": {"hidden": 16, "weight_decay": 0.0001},
+    "mixture_components": 7,
 }
 FIXED = {
     "gbdt": {"max_iter": 200, "seed": 0},
@@ -356,6 +365,55 @@ def smape(frame: pd.DataFrame, names: list[str]) -> pd.DataFrame:
                 }
             )
     return pd.DataFrame(rows)
+
+
+def matched(
+    frame: pd.DataFrame,
+    revealed: pd.DataFrame,
+    names: dict[str, str],
+    *,
+    miss: float = 0.10,
+    window_days: float = 90,
+) -> pd.DataFrame:
+    """H4 (analysis plan, Section 9): each model's stay bound at matched 90% reliability.
+
+    Each decision day, a model's level is the split conformal level (`daylevel`) of its own
+    earlier car-days' stay scores (the largest level at which each bound held), over the
+    car-days revealed before that morning and decided within the last `window_days`, at a
+    miss rate of 10% of car-days; its bound for each car that day is read at that level. The
+    same rule for every model, so the comparison is at matched reliability; the achieved
+    coverage is reported beside the hours kept. `revealed` gives each decision's
+    ``revealed_at``. Car-days without a prediction are left out.
+    """
+    days = frame[["decision_time"]].merge(revealed, on="decision_time", how="left")
+    times = frame["decision_time"].to_numpy()
+    seen = days["revealed_at"].to_numpy()
+    deadline = frame["true_deadline"].to_numpy(float)
+    rows = []
+    for name, label in names.items():
+        grid = frame[_columns(name, "stay")].to_numpy(float)
+        ok = ~np.isnan(grid).any(axis=1)
+        score = held_level(grid, deadline, "stay")
+        for t in np.unique(times[ok]):
+            past = ok & (seen < t) & (times >= t - np.timedelta64(int(window_days * 86400), "s"))
+            level = conformal_level(score[past], miss)
+            today = np.flatnonzero(ok & (times == t))
+            bound = at_levels(grid[today], level)
+            steps = np.floor(np.minimum(bound, 10.0) / STEP_H + 1e-9)
+            rows.append(
+                pd.DataFrame(
+                    {
+                        "decision_time": frame["decision_time"].iloc[today].to_numpy(),
+                        "session_id": frame["session_id"].iloc[today].to_numpy(),
+                        "rule": label,
+                        "level": level,
+                        "past_car_days": int(past.sum()),
+                        "bound_h": steps * STEP_H,
+                        "held": steps <= deadline[today],
+                    }
+                )
+            )
+    return pd.concat(rows, ignore_index=True) if rows else pd.DataFrame()
 
 
 def figure_one(

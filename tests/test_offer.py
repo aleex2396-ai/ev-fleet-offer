@@ -67,7 +67,7 @@ def programme_24_as_printed(fleet: Fleet, base: BaseSet) -> float:
         a[:, g : g + t] = h
         ub.append(a.tocsr())
         ub_rhs.append(his[i])
-    bounds = [(0, None)] + [(None, None)] * t
+    bounds = [(0, None)] + [(None, None)] * t  # alpha >= 0 in place of (24)'s alpha > 0
     for _ in range(n):
         bounds += [(None, None)] * (t + t * t) + [(0, None)] * (m * m)  # Lambda_i >= 0   (21)
     c = np.zeros(nvar)

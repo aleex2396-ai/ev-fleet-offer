@@ -225,6 +225,48 @@ for all stations, with 3.3 kW and 11 kW as sensitivities. The series of all deve
 sessions are not fetched; `fleetoffer series caltech` remains for anyone who wants them. The
 sample's series stay stored and fingerprinted as the record of the check.
 
+## Checks before the tag
+
+The checks of the analysis plan, Section 10a, are run by `fleetoffer checks` on Caltech data
+through August 2019, except D3, which counts cars on the model-selection and frozen
+evaluation months as its rule states. D1 is above. The results that do not involve an offer:
+
+- **D2, caps.** Not measurable: it needs each station's measured power, which only the time
+  series give, and they failed D1. 6.7 kW stands for every station as an assumption. For
+  context only, the average power over each session (recorded energy over the time from
+  plug-in to charging-done) is above 6.7 kW for 2.7% of the 22,237 sessions with both times,
+  above 7.5 kW for 0.23%, and its 99th percentile is 6.83 kW. An average understates the peak,
+  so this neither confirms nor rejects the cap.
+- **D3, cars with energy at 10:00.** Over the 218 weekdays of May 2019 to February 2020, the
+  median number of present cars that took more than 0.5 kWh after 10:00 is 14 and the 10th
+  percentile is 7, so 10:00 is kept (the rule asks for at least 10 and 4). 17 weekdays have
+  fewer than five such cars and are not scored: 3 of the 88 model-selection weekdays and 14 of
+  the 130 frozen evaluation weekdays, which leaves 116 scored weekdays there. Taken alone, the
+  frozen evaluation months have a 10th percentile of 3.9; the rule pools both periods.
+  Counts per weekday: `results/checks/d3_counts.csv`.
+- **D4, unclaimed sessions.** Of 9,128 car-days at 10:00, 56.2% are unclaimed, 16.4% have
+  nothing left to take (an estimate of at most 10⁻⁹ kWh after 10:00), and 10.2% are both. That
+  is under the 30% of the rule, so no ceiling is set to zero by rule and the claimed-only
+  sensitivity is not added.
+- **D5, typed requests in time.** On 222 of the 350 weekdays with cars that took energy, at
+  least 30% of those cars had a typed request recorded before 10:00 (median share 83%). That
+  is more than 200 weekdays, so the typed-request sensitivity is kept.
+- **D6, driver history.** The share of present cars linked to a driver by 10:00 rises from
+  under 3% before September 2018 to 82% in November 2018, when charging became paid for
+  claimed sessions, and stays between 84% and 93% through August 2019; the share also with at
+  least three earlier ended sessions follows it, between 82% and 92% from December 2018. Per
+  month: `results/checks/d6_by_month.csv`. Known and anonymous cars are evaluated separately.
+- **D7, energy as a proxy for need.** Among the 3,948 sessions with a typed request before
+  10:00, each counted once, the recorded energy is a median 0.64 of the latest request (the
+  rule asks for 0.8 to 1.2) and the rank correlation is 0.75 (at least 0.6). The ratio fails,
+  so the results' headline says that the energy is scheduler-shaped: cars took about two
+  thirds of what their drivers asked for, while larger requests still went with larger
+  deliveries.
+- **D12, the base set.** The base set's vector h₀, from every car present at 10:00 on a
+  weekday through April 2019, has a power limit that falls from 5.06 kW at 10:00 to 0.27 kW at
+  19:45 and is positive at all 40 steps, and an energy limit of 5.77 kWh; U₀ is non-empty with
+  positive width at every step. The full vector is in `docs/registration.md`.
+
 ## Check against an independent public copy
 
 SustainGym (Yeh et al., NeurIPS 2023 Datasets and Benchmarks Track) publishes four extracts

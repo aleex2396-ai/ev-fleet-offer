@@ -73,3 +73,29 @@ def test_the_d10_reading_uses_the_tighter_tolerance_at_0005():
 def test_months_after_august_2019_need_the_tag(tmp_path):
     with pytest.raises(SealedPeriodError):
         percar.load(tmp_path, until=pd.Timestamp("2019-10-01", tz="America/Los_Angeles"))
+
+
+def test_h4_reads_each_models_bound_at_the_level_its_own_past_car_days_give():
+    day1 = frame([2.0] * 10, [8] * 9 + [7], ["u"] * 10)  # one bound of ten fails (8 > 7 steps)
+    day2 = frame([3.0] * 4, [20] * 4, ["u"] * 4)
+    day2["decision_time"] = day1["decision_time"].iloc[0] + pd.Timedelta(days=1)
+    both = pd.concat([day1, day2], ignore_index=True)
+    revealed = pd.DataFrame(
+        {
+            "decision_time": both["decision_time"].unique(),
+            "revealed_at": both["decision_time"].unique() + pd.Timedelta(hours=10),
+        }
+    )
+    rows = percar.matched(both, revealed, {"m": "model"}).set_index("session_id")
+    first = rows[rows["decision_time"] == day1["decision_time"].iloc[0]]
+    assert (first["level"] == 0).all() and (first["bound_h"] == 0).all()  # nothing known yet
+    second = rows[rows["decision_time"] == day2["decision_time"].iloc[0]]
+    # ten past scores, k = floor(0.1 * 11) = 1: the smallest, 0 (the failed car): trivial
+    assert (second["level"] == 0).all() and (second["past_car_days"] == 10).all()
+
+    day1["true_deadline"] = 8  # now every bound of day 1 held: k = 1 gives the top level
+    both = pd.concat([day1, day2], ignore_index=True)
+    rows = percar.matched(both, revealed, {"m": "model"})
+    second = rows[rows["decision_time"] == day2["decision_time"].iloc[0]]
+    assert (second["level"] == 0.95).all() and (second["bound_h"] == 3.0).all()
+    assert second["held"].all()

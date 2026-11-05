@@ -22,7 +22,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from fleetoffer import __version__, acn, calibrate, data, offer, percar
+from fleetoffer import __version__, acn, calibrate, data, devchecks, offer, percar
 from fleetoffer.engine import Daily, Oracle, energy_in_window, fleet_replay, replay
 from fleetoffer.figures import plot_monthly
 from fleetoffer.models import FrozenQuantile, RollingQuantile
@@ -431,12 +431,117 @@ def run_percar(data_root: Path, out: Path) -> dict:
         "grid": percar.GRID,
         "fixed": percar.FIXED,
         "chosen": chosen,
+        "chosen_matches_committed": chosen == percar.CHOSEN,
         "periods": counts.reset_index().to_dict(orient="records"),
         "seconds": clock,
         "outputs": sorted(p.name for p in out.iterdir() if p.name != "manifest.json"),
         "figure": figure.name,
     }
     (out / "manifest.json").write_text(json.dumps(manifest, indent=2, default=str) + "\n")
+    return manifest
+
+
+def _json(value):
+    if isinstance(value, dict):
+        return {k: _json(v) for k, v in value.items()}
+    if isinstance(value, list | tuple):
+        return [_json(v) for v in value]
+    if isinstance(value, np.generic):
+        return value.item()
+    return value
+
+
+def run_checks(data_root: Path, out: Path, workers: int = 9) -> dict:
+    """Checks D2 to D12 and the two reports before the tag (`devchecks`).
+
+    Checks that use no offer go to `out`; everything computed from offers (D9, the shares of
+    days with a zero offer, the week-to-week spread, sizes and delivery by arm) goes to
+    `out/fleet`, kept apart so it can be withheld until predictions are written.
+    """
+    out, fleet_out = Path(out), Path(out) / "fleet"
+    fleet_out.mkdir(parents=True, exist_ok=True)
+    start = datetime.now(UTC)
+
+    counts = devchecks.d3_counts(devchecks.development_sessions(data_root))
+    counts.to_csv(out / "d3_counts.csv", index=False)
+    d3 = devchecks.d3_reading(counts)
+    if not d3["passes"]:  # D3: test 09:00 by the same rule
+        early = devchecks.d3_counts(
+            devchecks.development_sessions(data_root), Daily(at="09:00", tz=DEMO_TZ)
+        )
+        early.to_csv(out / "d3_counts_0900.csv", index=False)
+        d3["at_0900"] = devchecks.d3_reading(early)
+
+    sessions, entries = percar.load(data_root)
+    cardays = percar.record(sessions, entries).cardays()
+    d6 = devchecks.d6(cardays)
+    d6.to_csv(out / "d6_by_month.csv", index=False)
+    base = devchecks.training_base_set(sessions, percar.SPLIT_END)
+    checks = {
+        "D2": devchecks.d2_reading(sessions),
+        "D3": d3,
+        "D4": devchecks.d4(cardays),
+        "D5": devchecks.d5(cardays),
+        "D6": {"months": len(d6), "file": "d6_by_month.csv"},
+        "D7": devchecks.d7(cardays, sessions),
+        "D12": devchecks.d12(base),
+    }
+
+    arms = devchecks.run_arms(data_root, workers=workers)
+    days = pd.concat([a["days"] for a in arms], ignore_index=True)
+    days.to_csv(fleet_out / "days.csv.gz", index=False)
+    by_name = {a["name"]: a for a in arms}
+    for a in arms:
+        if "log" in a:
+            a["log"].to_csv(fleet_out / f"log_arm{a['name']}.csv", index=False)
+    d10 = by_name["4"]["d10"]
+    d10.to_csv(out / "d10_reading.csv", index=False)
+    found = {
+        t: tuple(float(q) for q in d10.loc[(d10["target"] == t) & d10["within"], "level"])
+        for t in ("stay", "energy")
+    }
+    checks["D10"] = {
+        "supported": found,
+        "matches_committed": found == {k: tuple(v) for k, v in devchecks.D10_SUPPORTED.items()},
+    }
+    split_days = []
+    for name in ("4s", "5s", "6s"):
+        log = by_name[name]["log"]
+        log = log[log["fitted"] & (log["decision_time"] >= devchecks.SELECTION_START)]
+        split = int((log["rule"] == "split").sum())
+        split_days.append({"arm": name, "days": len(log), "split": split})
+    checks["D8"] = split_days
+    (out / "checks.json").write_text(json.dumps(_json(checks), indent=2, default=str))
+
+    oracle = by_name["1"]["days"]
+    fleet = {
+        "D9": devchecks.d9(oracle, days[days["rule"] != oracle["rule"].iloc[0]]),
+    }
+    devchecks.alpha_zero(days).to_csv(fleet_out / "by_arm.csv", index=False)
+    weekly, spread = devchecks.spread(by_name["4"]["days"], by_name["5"]["days"])
+    weekly.to_csv(fleet_out / "spread_weekly.csv", index=False)
+    fleet["spread"] = spread
+    union = by_name["3"]["log"]
+    union = union[union["decision_time"] >= devchecks.SELECTION_START]
+    fleet["union_trivial_stay_days"] = float((~union["stay_supported"]).mean())
+    fleet["feedback"] = {
+        name: devchecks.feedback_delay(by_name[name]["log"], devchecks.SELECTION_START)
+        for name in ("4", "5", "6")
+    }
+    (fleet_out / "fleet.json").write_text(json.dumps(_json(fleet), indent=2, default=str))
+
+    manifest = {
+        "run": "checks",
+        "made_at_utc": start.isoformat(timespec="seconds"),
+        "package_version": __version__,
+        "code": _git_state(),
+        "python": platform.python_version(),
+        "seconds": (datetime.now(UTC) - start).total_seconds(),
+        "arms": list(devchecks.ARMS),
+        "chosen": percar.CHOSEN,
+        "d10_supported": devchecks.D10_SUPPORTED,
+    }
+    (out / "manifest.json").write_text(json.dumps(_json(manifest), indent=2, default=str))
     return manifest
 
 
@@ -515,6 +620,14 @@ def main(argv: list[str] | None = None) -> int:
     per_car.add_argument("--data", type=Path, default=Path("data"))
     per_car.add_argument("--out", type=Path, default=Path("results/percar"))
 
+    dev = commands.add_parser(
+        "checks",
+        help="checks D2 to D12 and the reports before the tag (development data to August 2019)",
+    )
+    dev.add_argument("--data", type=Path, default=Path("data"))
+    dev.add_argument("--out", type=Path, default=Path("results/checks"))
+    dev.add_argument("--workers", type=int, default=9)
+
     commands.add_parser(
         "requirements",
         help="days the 2022 drift theorem needs for a 90%%-of-days offer, beside the days held",
@@ -584,6 +697,9 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "percar":
         manifest = run_percar(args.data, args.out)
         print(json.dumps({k: manifest[k] for k in ("chosen", "periods", "seconds")}, indent=2))
+    elif args.command == "checks":
+        manifest = run_checks(args.data, args.out, workers=args.workers)
+        print(f"wrote the checks to {args.out} in {manifest['seconds']:.0f} s")
     elif args.command == "requirements":
         print(calibrate.requirements_table().to_string(index=False))
         print()

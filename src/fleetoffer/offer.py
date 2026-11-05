@@ -14,8 +14,10 @@ gamma_i + Gamma_i U0 to lie in U_i whatever half-space description is used for t
 So the programme is written here with irredundant descriptions (a box and one energy row for
 each set, instead of the 4K rows of their H), which leaves the feasible values of p, alpha,
 gamma_i and Gamma_i, and hence the optimal alpha, exactly as in (24) and makes the programme
-about five times smaller. `tests/test_offer.py` solves (24) as printed on small fleets and
-checks that the two give the same alpha.
+about five times smaller. Lemma 1 assumes U0 nonempty; it always holds the zero profile. (24)
+asks alpha > 0; here alpha >= 0, so a day on which nothing can be offered gives alpha = 0
+rather than no solution. `tests/test_offer.py` solves (24) as printed, with the same
+relaxation, on small fleets and checks that the two give the same alpha.
 """
 
 from __future__ import annotations

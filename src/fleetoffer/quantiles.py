@@ -412,6 +412,7 @@ class PerCarRule(FleetRule):
         self.ended_at_origin: dict[pd.Timestamp, pd.DataFrame] = {}
         self._waiting: dict[pd.Timestamp, pd.DataFrame] = {}
         self._known: list[pd.DataFrame] = []
+        self.last_grid: tuple[np.ndarray, np.ndarray] | None = None
 
     def cardays(self) -> pd.DataFrame:
         """Every car-day whose outcome has been revealed so far, inputs and targets."""
@@ -441,6 +442,7 @@ class PerCarRule(FleetRule):
             user_id=day.present["user_id"].to_numpy(object)
         )
         self.records.append(pd.concat([keys, pd.DataFrame(columns, index=keys.index)], axis=1))
+        self.last_grid = primary  # the primary model's predictions at every level, this day
         stay, energy = (np.nan_to_num(at_level(p, self.level), nan=0.0) for p in primary)
         return stay, energy
 

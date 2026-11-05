@@ -31,7 +31,8 @@ Section III:
   follows from Theorem 4 through Hoeffding's inequality, so it is sufficient, not necessary.
 
 Here a sample is a whole day, the decision is one of 101 scaling levels of the offer, and
-eps = 0.10 for a 90%-of-days target. Each paper's alpha keeps its own meaning above.
+eps = 0.10: a failure probability of at most 10% on the next day. Each paper's alpha keeps
+its own meaning above.
 """
 
 from __future__ import annotations

@@ -116,3 +116,18 @@ above). What this repository has computed since is listed in the next section.
   to August 2019; `docs/theory.md` gives the numbers that showed it. No offer was built from
   learned bounds, no delivery check and no day-level rule was run on real data, and nothing
   from September 2019 onward was scored.
+- The checks of Section 10a before the tag (`fleetoffer checks`). D2, D4 to D7, D9, D10 and
+  D12 on Caltech data through August 2019 only: the stations' average power over each session,
+  the shares of unclaimed cars with nothing left to take, of typed requests in time, of linked
+  cars with three earlier sessions by month, the ratio and rank agreement of recorded to
+  requested energy, and the base set. D3 counts, for each weekday from May 2019 to February
+  2020, the cars present at 10:00 and those that took more than 0.5 kWh afterwards; for the
+  frozen evaluation months (September 2019 to February 2020) only these counts were kept, and
+  they set the step of the adaptive rule (`docs/theory.md`). The fleet layer was run for the
+  first time: all nine arms of Section 5, each warming up from the first month it could be
+  fitted, made offers on the weekdays of May to August 2019 only, with their delivery checks,
+  sizes, solve times, the oracle's α (D9), the share of days with α = 0 beside the day-average
+  base set, and the week-to-week spread of offer sizes. Two earlier runs of the same checks,
+  with steps of 0.17 and 0.02, were stopped before any fleet output was written; the D3 counts
+  of the second were read, and are the same counts. Nothing from September 2019 onward was
+  scored.

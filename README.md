@@ -10,12 +10,12 @@ The result is one of three sentences, each worth reporting: per-car learning off
 
 ## Status
 
-In development. No results from real data have been produced yet. The analysis plan (`docs/analysis-plan.md`: decision, offers, models, hypotheses with pass and fail criteria, the checks to run on development data, and the list of earlier looks at the data) is frozen by the git tag `analysis-plan` before any confirmatory run and before any sealed data are opened. "Pre-registered" below means fixed in that document before the tag.
+In development. The checks, settings and per-car scores so far use Caltech data before September 2019 only (`docs/data.md`, `docs/theory.md`, `docs/registration.md`); no evaluation result has been produced yet. The analysis plan (`docs/analysis-plan.md`: decision, offers, models, hypotheses with pass and fail criteria, the checks to run on development data, and the list of earlier looks at the data) is frozen by the git tag `analysis-plan` before any confirmatory run and before any sealed data are opened. "Pre-registered" below means fixed in that document before the tag.
 
 ## Design
 
 - **The decision.** At 10:00 on each weekday, for the cars plugged in at that moment, a set of fleet charging profiles for 10:00–20:00 in 15-minute steps. Nothing after 10:00 is used; no arrivals are forecast.
-- **Per-car sets.** Each car's flexibility set is a charging-only special case of the generalised battery model of Al Taha, Vincent and Bitar (2024, equation (2)), built as in their Example 1 but without discharge and with an energy ceiling in place of the energy requirement: power between 0 and a cap while plugged in, zero after a deadline, and cumulative energy after 10:00 at most what the car will still take. The set asks nothing of the car: charging nothing is always allowed, so "delivered" means the fleet profile can be split within caps, deadlines and ceilings, not that each driver is charged. The energy given to the cars under each delivered profile is reported beside the delivery rate, and a version with a required-energy floor per car is a stated sensitivity. The learned set uses one-sided bounds, a deadline no later than the car is predicted to leave and an energy ceiling no higher than it is predicted to take; a short proposition in `docs/theory.md` shows that the offered set then lies inside the fleet's true set whenever every car's two bounds hold (a sufficient condition, not a necessary one).
+- **Per-car sets.** Each car's flexibility set is a charging-only special case of the generalised battery model of Al Taha, Vincent and Bitar (2024, equation (2)), built as in their Example 1 but without discharge, with an energy ceiling in place of the battery's capacity limit, and without the energy requirement: power between 0 and a cap while plugged in, zero after a deadline, and cumulative energy after 10:00 at most what the car will still take. The set asks nothing of the car: charging nothing is always allowed, so "delivered" means the fleet profile can be split within caps, deadlines and ceilings, not that each driver is charged. The energy given to the cars under each delivered profile is reported beside the delivery rate, and a version with a required-energy floor per car is a stated sensitivity. The learned set uses one-sided bounds, a deadline no later than the car is predicted to leave and an energy ceiling no higher than it is predicted to take; a short proposition in `docs/theory.md` shows that the offered set then lies inside the fleet's true set whenever every car's two bounds hold (a sufficient condition, not a necessary one).
 - **The learned model.** Gradient-boosted quantile regression of remaining stay and remaining energy from inputs known at 10:00 (time, calendar, station, cars present, price regime, the driver's earlier sessions, a typed plan if recorded in time). For a car plugged in at 07:40 with five earlier sessions on record, the model returns at 10:00 lower quantiles of the hours it will still stay and the kWh it will still take; the offer uses those lower quantiles. It is to be trained in time order on sessions before March 2020, validated by pinball loss and coverage, and benchmarked against the Kaplan–Meier quantile given the time already plugged in, a stratified table by plug-in hour, each driver's own history, the mixture predictor of Lee, Li and Low (2019) and the typed plan at face value.
 - **The offer.** The structure-preserving linear programme of the 2024 paper (its programme (24)) fits a shifted, scaled base set inside the sum of the per-car sets; the allocation of its Section IV splits any offered profile among the cars by an affine map fixed at 10:00. The conditions are sufficient and conservative, as the paper states. For the charging-only sets used here the exact width of the fleet's cumulative-energy band has a closed form (and the exact aggregate set is a generalised polymatroid, Mukhi, Loho and Abate, 2026), so the gap between the offer and the exact band is reported on development days as the method's slack.
 - **Reliability.** Delivery is checked by replay in two ways. The allocation fixed at 10:00 is checked against what each car actually accepted; this is the primary check, and the one an aggregator could execute. A split chosen with hindsight among the cars actually present, by linear programming, is reported as an upper bound. Nine fixed profiles from the offer are checked, not every profile, and the results say so. The 90%-of-days target is set by a day-level calibration rule (adaptive conformal inference with days as steps, or a split conformal rule on the day's largest error), compared with a union bound across the cars' deadline and energy bounds. What each rule guarantees, and under which assumptions, is stated in `docs/theory.md`. So is the finite-sample theorem of Yan, Parise and Bitar (2022) for chance constraints under drift, with what it would need with days as samples: independent days, a known bound on how far whole-day configurations can drift, and 312 or 1,121 past days at the two settings used there. The record holds 483 weekdays before the change and 182 after it, so the count is met at the first setting and not at the second; the 90% target here rests on the calibration rules, not on that theorem.
@@ -43,6 +43,7 @@ Session data come from [Caltech ACN-Data](https://ev.caltech.edu/dataset), avail
 uv run fleetoffer fetch caltech    # stored under data/, never committed
 uv run fleetoffer verify caltech   # same data as this repository's fingerprints/caltech.csv?
 uv run fleetoffer percar           # per-car models and baselines, months through August 2019
+uv run fleetoffer checks           # checks D2 to D12 and the offers of every arm, May-August 2019
 ```
 
 The energy delivered after 10:00 is not a field of the session record. The per-session time series that would give it failed a quality check fixed before it was fetched (300 sampled sessions: 85% usable against a 95% threshold, median energy error 5.1% against 5%), so it is estimated from each session's recorded energy and charging-done time, and the energy ceiling is approximate. `docs/data.md` describes what is downloaded, the cleaning rules and their counts, the time-series check and the estimate, the sealed periods, and a check of the download against an independent public copy. If you use the data, cite Lee, Li and Low (2019).
@@ -71,14 +72,19 @@ src/fleetoffer/
   percar.py       the per-car layer on development months: settings search, refits, scores
   offer.py        per-car sets, the inner-approximation programme, the affine allocation,
                   the nine-profile delivery checks and the one-dimensional fallback
-  calibrate.py    union bound, day-level conformal, adaptive conformal
+  calibrate.py    what each day-level route to 90% of days requires (the theorems' arithmetic)
+  daylevel.py     the day-level rules: one shared level from past days (adaptive and split
+                  conformal), and the union bound
+  devchecks.py    the checks on development data before the tag (analysis plan, Section 10a)
+  resample.py     uncertainty by resampling whole weeks
   checks.py       the look-ahead scramble test, per car and per day
   synthetic.py    made-up fleets with known flexibility sets
   figures.py      figures, each drawn from a table also written to disk
   pipeline.py     end-to-end runs with manifests
 tests/            unit tests, including the look-ahead tests (no network needed)
 fingerprints/     SHA-256 of every downloaded month
-docs/             analysis plan, data notes, theory with theorem statements, earlier looks, discovery log
+docs/             analysis plan, what the tag fixes (registration), data notes, theory with theorem
+                  statements, earlier looks, discovery log
 ```
 
 ## References
