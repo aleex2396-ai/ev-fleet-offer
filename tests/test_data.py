@@ -290,8 +290,8 @@ def test_unusable_series_are_named(change, reason):
 def test_stored_series_keep_the_seals(tmp_path):
     before = series_record("s1", connect="Sat, 29 Feb 2020 20:00:00 GMT")
     after = series_record("s2", connect="Sun, 01 Mar 2020 09:00:00 GMT")
-    acn.save_series(tmp_path, "caltech", "2020-02", [before])
-    acn.save_series(tmp_path, "caltech", "2020-03", [after])
+    acn.save_series(tmp_path, "caltech", "2020-02-29", [before])
+    acn.save_series(tmp_path, "caltech", "2020-03-01", [after])
     acn.save_series(tmp_path, "caltech", "named", [before, after])
     assert [r["sessionID"] for r in data.load_series(tmp_path, "caltech")] == ["s1"]
     assert [r["sessionID"] for r in data.load_series(tmp_path, "caltech", "named")] == ["s1"]

@@ -114,10 +114,11 @@ times, about every four seconds. Its records are large (about 0.6 MB of JSON per
 pages hold 10 sessions. The pilot signal is the network's own current limit sent to the car,
 not a capability of the vehicle, and is never used as an input at 10:00.
 
-`fleetoffer series caltech` fetches every development month this way, clipped at the start of
-the sealed test period, so that no record from it is requested; months are stored and
-fingerprinted like the session months (`fingerprints/caltech-series.csv`, with each month's
-UTC window). `fleetoffer series caltech --sample` fetches the sample of check D1, one request
+`fleetoffer series caltech` fetches the development period this way one UTC day at a time
+(a month of records is too large to hold at once), from the first session's day to the start
+of the sealed test period, so that no record from it is requested; each day is stored and
+fingerprinted like the session months (`fingerprints/caltech-series.csv`, with each day's UTC
+window). `fleetoffer series caltech --sample` fetches the sample of check D1, one request
 per session by a one-second window on its plug-in time (`fingerprints/caltech-series-d1-sample.csv`).
 `fleetoffer verify caltech --series` recomputes both.
 

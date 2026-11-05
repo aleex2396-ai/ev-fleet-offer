@@ -292,33 +292,37 @@ def ts_records():
     return [ts_record(i, start + pd.Timedelta(hours=7 * i)) for i in range(25)]
 
 
-def test_series_windows_stop_at_the_sealed_period():
+def test_series_windows_are_utc_days_up_to_the_sealed_period():
     until = pd.Timestamp("2020-03-01", tz="America/Los_Angeles")  # 08:00 UTC
-    windows = acn.series_windows("2020-01", "2020-04", until)
-    assert [w[0] for w in windows] == ["2020-01", "2020-02", "2020-03"]
-    assert windows[-1][1] == pd.Timestamp("2020-03-01 00:00", tz="UTC")
-    assert windows[-1][2] == pd.Timestamp("2020-03-01 08:00", tz="UTC")
+    windows = acn.series_windows("2020-02-27", until)
+    assert [w[0] for w in windows] == ["2020-02-27", "2020-02-28", "2020-02-29", "2020-03-01"]
+    assert windows[0][2] - windows[0][1] == pd.Timedelta(days=1)
+    assert windows[-1][1:] == (
+        pd.Timestamp("2020-03-01 00:00", tz="UTC"),
+        pd.Timestamp("2020-03-01 08:00", tz="UTC"),
+    )
 
 
-def test_fetch_series_site_pages_clips_and_resumes(tmp_path):
+def test_fetch_series_site_clips_and_resumes(tmp_path):
     server = FakeSeriesServer(ts_records())
     until = pd.Timestamp("2020-03-01", tz="America/Los_Angeles")
     kwargs = {"until": until, "data_root": tmp_path, "fingerprint_dir": tmp_path, "get": server}
-    table = acn.fetch_series_site("caltech", "2020-02", "2020-03", **kwargs, progress=lambda _: 0)
-    # Sessions every 7 hours from 27 Feb 16:00 UTC (2020 is a leap year): eight in February,
-    # then s8 (1 March 00:00) and s9 (07:00) before 08:00 UTC; later ones are never requested.
-    assert list(table["sessions"]) == [8, 2]
+    table = acn.fetch_series_site("caltech", "2020-02-27", **kwargs, progress=lambda _: 0)
+    # Sessions every 7 hours from 27 Feb 16:00 UTC (2020 is a leap year): s0 and s1 on the
+    # 27th, s2 to s4 on the 28th, s5 to s7 on the 29th, then s8 (1 March 00:00) and s9
+    # (07:00) before 08:00 UTC; later ones are never requested.
+    assert list(table["sessions"]) == [2, 3, 3, 2]
     assert all("ts?" in call for call in server.calls)
-    stored = acn.read_series(tmp_path, "caltech", "2020-03")
+    stored = acn.read_series(tmp_path, "caltech", "2020-03-01")
     assert sorted(r["sessionID"] for r in stored) == ["s8", "s9"]
     assert all("_links" not in r for r in stored)
 
     calls = len(server.calls)
-    again = acn.fetch_series_site("caltech", "2020-02", "2020-03", **kwargs, progress=lambda _: 0)
+    again = acn.fetch_series_site("caltech", "2020-02-27", **kwargs, progress=lambda _: 0)
     assert len(server.calls) == calls  # nothing fetched twice
     pd.testing.assert_frame_equal(again, table)
     on_disk = pd.read_csv(tmp_path / "caltech-series.csv", dtype=str)
-    assert list(on_disk["month"]) == ["2020-02", "2020-03"]
+    assert list(on_disk["day"]) == ["2020-02-27", "2020-02-28", "2020-02-29", "2020-03-01"]
     report = acn.verify_series(tmp_path, tmp_path, "caltech-series", "caltech")
     assert report["matches"].all()
 

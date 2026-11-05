@@ -30,9 +30,9 @@ seconds) come from the API's time-series endpoint, ``sessions/<site>/ts``, which
 same ``connectionTime`` windows. Its records are large, so pages hold 10 sessions, which keeps
 each request well under the server's timeout. Two ways in:
 
-- `fetch_series_site`: whole months, clipped at a given end time so that a sealed period is
-  never requested, stored in ``data/raw/<site>-series/<YYYY-MM>.json.gz`` with fingerprints
-  in ``fingerprints/<site>-series.csv``. A month already stored is not fetched again.
+- `fetch_series_site`: one UTC day at a time, the last clipped at a given end time so that a
+  sealed period is never requested, stored in ``data/raw/<site>-series/<YYYY-MM-DD>.json.gz``
+  with fingerprints in ``fingerprints/<site>-series.csv``. A stored day is not fetched again.
 - `fetch_series_sessions`: a list of sessions, one request each, by a one-second window on
   the session's plug-in time, stored as one named file with its own fingerprint.
 """
@@ -290,24 +290,18 @@ def read_series(root: Path, site: str, name: str) -> list[dict]:
         return json.loads(f.read())
 
 
-def series_windows(
-    first: str, last: str, until: pd.Timestamp
-) -> list[tuple[str, pd.Timestamp, pd.Timestamp]]:
-    """(month, start, end) UTC windows from `first` to `last`, each clipped to end by `until`."""
+def series_windows(first: str, until: pd.Timestamp) -> list[tuple[str, pd.Timestamp, pd.Timestamp]]:
+    """(day, start, end) UTC-day windows from `first` (YYYY-MM-DD), the last clipped at `until`."""
     until = pd.Timestamp(until).tz_convert("UTC")
     out = []
-    for month in months_between(first, last):
-        start, end = month_window(month)
-        if start >= until:
-            break
-        out.append((month, start, min(end, until)))
+    for start in pd.date_range(pd.Timestamp(first, tz="UTC"), until, freq="D", inclusive="left"):
+        out.append((start.strftime("%Y-%m-%d"), start, min(start + pd.Timedelta(days=1), until)))
     return out
 
 
 def fetch_series_site(
     site: str,
     first: str,
-    last: str,
     *,
     until: pd.Timestamp,
     data_root: Path,
@@ -315,25 +309,24 @@ def fetch_series_site(
     get: Getter,
     progress: Callable[[str], None] = print,
 ) -> pd.DataFrame:
-    """Fetch and store each month's time series up to `until`; write the fingerprint table.
+    """Fetch and store each UTC day's time series from `first` up to `until`, with fingerprints.
 
-    Months already stored are fingerprinted from disk, not fetched again, so an interrupted
-    run resumes where it stopped. The table is rewritten after every month. Progress lines
-    report counts only.
+    A day is the storage unit because a month of records is too large to hold at once. Days
+    already stored are fingerprinted from disk, not fetched again, so an interrupted run
+    resumes where it stopped. The table is rewritten after every day. Progress lines report
+    counts only.
     """
     rows = []
-    for month, start, end in series_windows(first, last, until):
-        path = series_path(data_root, site, month)
+    for day, start, end in series_windows(first, until):
+        path = series_path(data_root, site, day)
         if path.exists():
-            items = read_series(data_root, site, month)
-            note = "already stored"
+            items = read_series(data_root, site, day)
         else:
             items = fetch_series_window(site, start, end, get)
-            save_series(data_root, site, month, items)
-            note = "fetched"
+            save_series(data_root, site, day, items)
         rows.append(
             {
-                "month": month,
+                "day": day,
                 "start_utc": start.strftime("%Y-%m-%d %H:%M"),
                 "end_utc": end.strftime("%Y-%m-%d %H:%M"),
                 "sessions": len(items),
@@ -341,8 +334,10 @@ def fetch_series_site(
             }
         )
         write_fingerprints(fingerprint_dir, f"{site}-series", pd.DataFrame(rows))
-        progress(f"{site} series {month}: {len(items)} sessions ({note})")
-    return pd.DataFrame(rows, columns=["month", "start_utc", "end_utc", "sessions", "sha256"])
+        if day.endswith("-01") or end == until:
+            total = sum(r["sessions"] for r in rows)
+            progress(f"{site} series up to {day}: {len(rows)} days, {total} sessions")
+    return pd.DataFrame(rows, columns=["day", "start_utc", "end_utc", "sessions", "sha256"])
 
 
 def fetch_series_sessions(
@@ -381,7 +376,7 @@ def verify_series(
 ) -> pd.DataFrame:
     """Recompute stored time-series fingerprints against a committed table."""
     expected = pd.read_csv(Path(fingerprint_dir) / f"{table_name}.csv", dtype=str)
-    key = "month" if "month" in expected.columns else "name"
+    key = "day" if "day" in expected.columns else "name"
     found = []
     for name in expected[key]:
         path = series_path(data_root, site, name)

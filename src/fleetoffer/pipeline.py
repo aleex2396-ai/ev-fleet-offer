@@ -357,11 +357,10 @@ def main(argv: list[str] | None = None) -> int:
                 get=get,
             )
         else:
-            first, _ = SITE_MONTHS[args.site]
+            sessions, _ = data.load_sessions(args.data, args.site)
             table = acn.fetch_series_site(
                 args.site,
-                first,
-                until.tz_convert("UTC").strftime("%Y-%m"),
+                sessions["connect_time"].min().strftime("%Y-%m-%d"),
                 until=until,
                 data_root=args.data,
                 fingerprint_dir=args.fingerprints,

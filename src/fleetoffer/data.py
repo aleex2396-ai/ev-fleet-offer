@@ -383,7 +383,7 @@ def energy_kwh(
 def load_series(
     data_root: Path, site: str, name: str | None = None, *, unseal: bool = False
 ) -> list[dict]:
-    """Stored time-series records: every stored month, or the one named file.
+    """Stored time-series records: every stored day, or the one named file.
 
     The seals of `load_items` apply: the replication site is refused, and Caltech records
     from its main test period are dropped unless it is unsealed after the plan's tag.
@@ -397,8 +397,8 @@ def load_series(
         items = read_series(data_root, site, name)
     else:
         folder = series_path(data_root, site, "x").parent
-        months = sorted(p.name.removesuffix(".json.gz") for p in folder.glob("????-??.json.gz"))
-        items = [item for month in months for item in read_series(data_root, site, month)]
+        days = sorted(p.name.removesuffix(".json.gz") for p in folder.glob("????-??-??.json.gz"))
+        items = [item for day in days for item in read_series(data_root, site, day)]
     if start is not None and not unseal:
         items = [item for item in items if _plugged_in_before(item, start)]
     return items
