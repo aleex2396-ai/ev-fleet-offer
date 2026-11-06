@@ -22,7 +22,17 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from fleetoffer import __version__, acn, calibrate, data, devchecks, offer, options, percar
+from fleetoffer import (
+    __version__,
+    acn,
+    calibrate,
+    data,
+    devchecks,
+    levels,
+    offer,
+    options,
+    percar,
+)
 from fleetoffer.engine import Daily, Oracle, energy_in_window, fleet_replay, replay
 from fleetoffer.figures import plot_monthly
 from fleetoffer.models import FrozenQuantile, RollingQuantile
@@ -573,6 +583,37 @@ def run_options(data_root: Path, out: Path, workers: int = 10) -> dict:
     return manifest
 
 
+def run_levels(data_root: Path, out: Path, workers: int = 10) -> dict:
+    """The level sweep on the model-selection months only (`levels`)."""
+    out = Path(out)
+    out.mkdir(parents=True, exist_ok=True)
+    start = datetime.now(UTC)
+    runs = levels.run_all(data_root, workers=workers, store=out / "runs")
+    sweep = pd.concat([r["sweep"] for r in runs if "sweep" in r], ignore_index=True)
+    oracle = pd.concat(
+        [r["oracle"].assign(form=r["form"]) for r in runs if "oracle" in r], ignore_index=True
+    )
+    sweep.to_csv(out / "sweep.csv.gz", index=False)
+    oracle.to_csv(out / "oracle.csv.gz", index=False)
+    by_level = levels.table(sweep)
+    by_level.to_csv(out / "table.csv", index=False)
+    levels.oracle_table(oracle).to_csv(out / "oracle.csv", index=False)
+    levels.matched(by_level).to_csv(out / "matched.csv", index=False)
+    manifest = {
+        "run": "levels",
+        "made_at_utc": start.isoformat(timespec="seconds"),
+        "package_version": __version__,
+        "code": _git_state(),
+        "python": platform.python_version(),
+        "solver": offer.SOLVER,
+        "seconds": (datetime.now(UTC) - start).total_seconds(),
+        "runs": [list(r) for r in levels.RUNS],
+        "chosen": percar.CHOSEN,
+    }
+    (out / "manifest.json").write_text(json.dumps(_json(manifest), indent=2, default=str))
+    return manifest
+
+
 def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
@@ -664,6 +705,14 @@ def main(argv: list[str] | None = None) -> int:
     opts.add_argument("--out", type=Path, default=Path("results/options"))
     opts.add_argument("--workers", type=int, default=10)
 
+    lev = commands.add_parser(
+        "levels",
+        help="the level sweep: offer size against delivery at every level, May to August 2019",
+    )
+    lev.add_argument("--data", type=Path, default=Path("data"))
+    lev.add_argument("--out", type=Path, default=Path("results/levels"))
+    lev.add_argument("--workers", type=int, default=10)
+
     commands.add_parser(
         "requirements",
         help="days the 2022 drift theorem needs for a 90%%-of-days offer, beside the days held",
@@ -739,6 +788,9 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "options":
         manifest = run_options(args.data, args.out, workers=args.workers)
         print(f"wrote the options to {args.out} in {manifest['seconds']:.0f} s")
+    elif args.command == "levels":
+        manifest = run_levels(args.data, args.out, workers=args.workers)
+        print(f"wrote the level sweep to {args.out} in {manifest['seconds']:.0f} s")
     elif args.command == "requirements":
         print(calibrate.requirements_table().to_string(index=False))
         print()

@@ -42,6 +42,7 @@ from sklearn.ensemble import HistGradientBoostingRegressor
 from sklearn.linear_model import QuantileRegressor
 
 from fleetoffer.academic import day_flags
+from fleetoffer.engine import EMPTY_KWH
 from fleetoffer.features import LOCAL_TZ, NUMERIC, at_decision
 from fleetoffer.interface import DayOutcome, DayView, FleetRule
 from fleetoffer.offer import STEP_H, STEPS
@@ -396,6 +397,7 @@ class PerCarRule(FleetRule):
         min_rows: int = 200,
         name: str | None = None,
         calendar: Callable[..., pd.DataFrame] = day_flags,
+        energy_left_only: bool = False,
     ) -> None:
         if not models:
             raise ValueError("give at least one model")
@@ -405,6 +407,7 @@ class PerCarRule(FleetRule):
         self.min_rows = min_rows
         self.name = name or models[0].name
         self.calendar = calendar
+        self.energy_left_only = energy_left_only  # train on car-days that took energy only
         self.origin: pd.Timestamp | None = None
         self.fitted: dict[str, bool] = {}
         self.fit_log: list[dict] = []
@@ -450,6 +453,8 @@ class PerCarRule(FleetRule):
         self.origin = origin
         known = self.cardays()
         train = training_rows(known, origin, self.window_days) if len(known) else known
+        if self.energy_left_only and len(train):
+            train = train[train["target_energy_kwh"] > EMPTY_KWH].reset_index(drop=True)
         ended = ended_rows(day.ended, origin, self.window_days)
         self.ended_at_origin[origin] = ended_rows(day.ended, origin)
         for model in self.models:

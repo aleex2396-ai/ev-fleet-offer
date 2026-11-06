@@ -23,7 +23,7 @@ import hashlib
 import heapq
 import itertools
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 import pandas as pd
@@ -258,6 +258,7 @@ CAR_COLUMNS = [
 _KNOWN_ON_ARRIVAL = ("session_id", "connect_time", "station_id", "space_id")
 _ENERGY_TOL_KWH = 1e-9
 ENERGY_REMAINING_KWH = 0.5  # a car "has energy remaining" above this (check D3)
+EMPTY_KWH = 1e-9  # a car takes nothing after the decision time at or below this (check D4)
 
 
 class Oracle(FleetRule):
@@ -371,6 +372,7 @@ def fleet_replay(
     until: pd.Timestamp | None = None,
     offers_from: pd.Timestamp | None = None,
     day_average_too: bool = False,
+    reveal_empty: bool = False,
     cap: float = CAP_KW,
     steps: int = STEPS,
     step_h: float = STEP_H,
@@ -388,7 +390,9 @@ def fleet_replay(
     (`DayOutcome`). Decisions stop before `until`, if given. Before `offers_from`, if given,
     the rule runs and learns but no offer is made (a warm-up). With `day_average_too`, the
     programme is also solved on the day-average base set, and its α and size are recorded
-    beside those of `base`.
+    beside those of `base`. With `reveal_empty`, the day view also says which present cars
+    truly take nothing after the decision time (`DayView.known_empty`): a perfect-knowledge
+    yardstick for the level sweep's diagnostic, never used by a registered arm.
     """
     if method not in ("programme", "segment", "bounds"):
         raise ValueError("method must be 'programme', 'segment' or 'bounds'")
@@ -420,6 +424,8 @@ def fleet_replay(
             learned = true
         else:
             view = _view(table, when, present, np.flatnonzero(disconnect_h < t), entries)
+            if reveal_empty:
+                view = replace(view, known_empty=true.energy <= EMPTY_KWH)
             stay_h, energy = (np.asarray(b, dtype=float) for b in rule.bounds(view))
             if stay_h.shape != (len(present),) or energy.shape != (len(present),):
                 raise ValueError(f"{rule.name} must give one stay and one energy bound per car")

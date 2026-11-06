@@ -39,7 +39,7 @@ from scipy.stats import norm
 from sklearn.mixture import GaussianMixture
 
 from fleetoffer.data import to_hours
-from fleetoffer.engine import energy_in_window
+from fleetoffer.engine import EMPTY_KWH, energy_in_window
 from fleetoffer.features import LOCAL_TZ
 from fleetoffer.models import km_curve, lower_quantile
 from fleetoffer.quantiles import HORIZON_H, LEVELS, QuantileModel, tidy
@@ -90,15 +90,16 @@ class _Sessions:
         return km_curve(self.stay, np.ones(len(self.stay), dtype=bool))
 
     def conditional(
-        self, elapsed_h: float, curve: tuple[np.ndarray, np.ndarray] | None = None
+        self,
+        elapsed_h: float,
+        curve: tuple[np.ndarray, np.ndarray] | None = None,
+        energy_left_only: bool = False,
     ) -> tuple[np.ndarray, np.ndarray]:
-        """Lower quantiles of remaining stay and of horizon energy given `elapsed_h`."""
+        """Lower quantiles of remaining stay and of horizon energy given `elapsed_h`; with
+        `energy_left_only`, among the sessions that took energy in the horizon only."""
         stay = self.stay
         if len(stay) == 0:
             return np.full(len(LEVELS), np.nan), np.full(len(LEVELS), np.nan)
-        times, survival = self.curve() if curve is None else curve
-        quantiles = [lower_quantile(times, survival, float(q), elapsed_h) for q in LEVELS]
-        remaining = np.array([np.nan if x is None else x for x in quantiles])
         lasted = stay >= elapsed_h
         start = self.connect[lasted] + elapsed_h
         energy = energy_in_window(
@@ -109,6 +110,16 @@ class _Sessions:
             start,
             start + HORIZON_H,
         )
+        if energy_left_only:
+            took = energy > EMPTY_KWH
+            energy = energy[took]
+            kept = stay[lasted][took]
+            curve = km_curve(kept, np.ones(len(kept), dtype=bool)) if len(kept) else None
+            if curve is None:
+                return np.full(len(LEVELS), np.nan), np.full(len(LEVELS), np.nan)
+        times, survival = self.curve() if curve is None else curve
+        quantiles = [lower_quantile(times, survival, float(q), elapsed_h) for q in LEVELS]
+        remaining = np.array([np.nan if x is None else x for x in quantiles])
         return remaining, _empirical(energy)
 
 
@@ -117,6 +128,7 @@ class Population(QuantileModel):
     """Arms 2 and 5: the site's recently ended sessions, conditioned on time plugged in."""
 
     name: str = "population"
+    energy_left_only: bool = False  # the level sweep's diagnostic: sessions that took energy
 
     def fit(self, train, ended, origin):
         self.sessions = _Sessions.of(ended)
@@ -124,7 +136,8 @@ class Population(QuantileModel):
 
     def predict(self, day, feats):
         elapsed = feats["elapsed_h"].to_numpy(float)
-        rows = [self.sessions.conditional(e, self.km) for e in elapsed]
+        curve = None if self.energy_left_only else self.km
+        rows = [self.sessions.conditional(e, curve, self.energy_left_only) for e in elapsed]
         return tidy(np.array([r[0] for r in rows]), np.array([r[1] for r in rows]))
 
 

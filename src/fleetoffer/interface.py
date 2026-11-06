@@ -134,12 +134,17 @@ class DayView:
     ``ended`` holds every session that had ended before the decision time, with all its
     fields, and ``user_id`` shown on the same condition. ``entries`` holds the app entries
     (typed plans) recorded before the decision time, of any session.
+
+    ``known_empty`` is None, except in the one-fact diagnostic of the level sweep, a
+    perfect-knowledge yardstick in which the engine reveals, for each present car, whether it
+    truly takes nothing after the decision time (`fleet_replay`'s ``reveal_empty``).
     """
 
     decision_time: pd.Timestamp
     present: pd.DataFrame
     ended: pd.DataFrame
     entries: pd.DataFrame = field(default_factory=pd.DataFrame)
+    known_empty: np.ndarray | None = None
 
 
 @dataclass(frozen=True)

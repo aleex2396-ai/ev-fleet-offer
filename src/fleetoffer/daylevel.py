@@ -39,6 +39,20 @@ the bounds the model gave that morning, was delivered under the allocation fixed
 that level and at every lower one. A day on which the offer at the level used was not
 delivered has a score below that level, so the share of failed days the rule controls is at
 least the share of days not delivered.
+
+**The level sweep** (`LevelSweep`, a descriptive diagnostic chosen after the first fleet run,
+not a registered arm). On each day, the offer of each given form at every level of
+`DELIVERY_LEVELS`, all made at the decision time from that morning's bounds, and scored once
+the day's outcome is known: size, delivery under the fixed allocation and with a split chosen
+with hindsight, whether every bound held, and how many cars were given a zero energy ceiling
+or a zero stay. It chooses nothing; it shows the trade between offer size and delivery that
+any single shared level faces.
+
+Its one-fact diagnostic (`drop_empty`, a perfect-knowledge yardstick, not a method that could
+be deployed): the engine reveals which present cars truly take nothing after 10:00; those cars
+are dropped from the offer, and the per-car models, refitted on car-days that took energy,
+give the bounds of the others. It measures how much of the offer that one fact, which live
+charging status at 10:00 would approximate, recovers.
 """
 
 from __future__ import annotations
@@ -50,16 +64,19 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-from fleetoffer.engine import ENERGY_REMAINING_KWH, to_steps
+from fleetoffer.engine import ENERGY_REMAINING_KWH, _digest, to_steps
 from fleetoffer.interface import DayOutcome, DayView, FleetRule
 from fleetoffer.offer import (
     CAP_KW,
     DELIVERY_TOL_KWH,
+    SIZE_CHECKPOINTS,
     STEP_H,
     STEPS,
+    TRIVIAL_BASE_KWH,
     Fleet,
     Offer,
     SegmentOffer,
+    check_delivery,
     fixed_shortfall,
 )
 from fleetoffer.quantiles import LEVELS, PerCarRule
@@ -344,6 +361,127 @@ class DeliveryCalibrated(Calibrated):
             day.stay, day.energy, true, self.make_offer, self.levels, self.cap
         )
         return score, {"offers_made": offers}
+
+
+def offer_digest(offer: Offer | SegmentOffer) -> str:
+    """The fingerprint the engine keeps for an offer of either form."""
+    if isinstance(offer, Offer):
+        return offer.digest()
+    return _digest(offer.amplitude, offer.b, offer.w)
+
+
+@dataclass
+class _Made:
+    form: str
+    level: float
+    learned: Fleet
+    offer: Offer | SegmentOffer
+    kept: np.ndarray  # the present cars the offer is made for
+
+
+class LevelSweep(FleetRule):
+    """The level sweep (module docstring). `offers` maps each form's name to the offer it
+    makes from a fleet of learned sets. Offers are made only on days from `offers_from`, and
+    only once the model is fitted; every one is made in `bounds`, from that morning's bounds,
+    and its fingerprint is kept in `made` so that a no-look-ahead check can compare them. The
+    bounds given to the engine are those at `engine_level`; they serve only the engine's own
+    day row and its no-look-ahead check."""
+
+    def __init__(
+        self,
+        per_car: PerCarRule,
+        offers: dict[str, MakeOffer],
+        *,
+        levels: np.ndarray = DELIVERY_LEVELS,
+        cap: float = CAP_KW,
+        offers_from: pd.Timestamp | None = None,
+        engine_level: float = TARGET_MISS,
+        drop_empty: bool = False,
+        name: str | None = None,
+    ) -> None:
+        if drop_empty and not getattr(per_car, "energy_left_only", False):
+            raise ValueError("the diagnostic needs models trained on car-days that took energy")
+        self.drop_empty = drop_empty
+        self.per_car, self.offers = per_car, dict(offers)
+        self.levels, self.cap = np.asarray(levels, dtype=float), cap
+        self.offers_from, self.engine_level = offers_from, engine_level
+        self.name = name or f"{per_car.name}+levels"
+        self.log: list[dict] = []
+        self.made: list[dict] = []
+        self._pending: dict[pd.Timestamp, list[_Made]] = {}
+
+    def bounds(self, day: DayView) -> tuple[np.ndarray, np.ndarray]:
+        self.per_car.bounds(day)
+        stay, energy = self.per_car.last_grid
+        fitted = not np.isnan(stay).all()
+        offering = self.offers_from is None or day.decision_time >= self.offers_from
+        kept = np.ones(len(stay), dtype=bool)
+        if self.drop_empty:
+            if day.known_empty is None:
+                raise ValueError("the diagnostic needs the engine to reveal the empty cars")
+            kept = ~np.asarray(day.known_empty, dtype=bool)
+        made = []
+        if fitted and offering and kept.any():
+            for level in self.levels:
+                learned = fleet_at(stay[kept], energy[kept], level, cap=self.cap)
+                for form, make in self.offers.items():
+                    offer = make(learned)
+                    made.append(_Made(form, float(level), learned, offer, kept))
+                    self.made.append(
+                        {
+                            "decision_time": day.decision_time,
+                            "form": form,
+                            "level": float(level),
+                            "digest": offer_digest(offer),
+                        }
+                    )
+        self._pending[day.decision_time] = made
+        return tuple(
+            np.nan_to_num(at_levels(p, self.engine_level), nan=0.0) for p in (stay, energy)
+        )
+
+    def observe(self, outcome: DayOutcome) -> None:
+        self.per_car.observe(outcome)
+        made = self._pending.pop(outcome.decision_time)
+        if not made:
+            return
+        kept = made[0].kept
+        true = Fleet.of(outcome.true_deadline[kept], outcome.true_energy[kept], self.cap)
+        with_energy = true.energy > SCORED_ENERGY_KWH
+        exact_true = float(np.mean([true.band_width(k) for k in SIZE_CHECKPOINTS]))
+        for m in made:
+            delivery = check_delivery(m.offer, true)
+            zero_ceiling = m.learned.energy <= TRIVIAL_BASE_KWH
+            held = (m.learned.deadline <= true.deadline) & (
+                m.learned.energy <= true.energy + _ENERGY_TOL_KWH
+            )
+            self.log.append(
+                {
+                    "decision_time": outcome.decision_time,
+                    "revealed_at": outcome.revealed_at,
+                    "form": m.form,
+                    "level": m.level,
+                    "cars": len(true),
+                    "dropped_cars": int((~kept).sum()),
+                    "cars_with_energy": int(with_energy.sum()),
+                    "scored": is_scored(outcome.true_energy),
+                    "size_kwh": m.offer.size(),
+                    "fixed_delivered": delivery.fixed_delivered,
+                    "fixed_shortfall_kwh": max(delivery.fixed_kwh.values()),
+                    "hindsight_delivered": delivery.hindsight_delivered,
+                    "hindsight_shortfall_kwh": max(delivery.hindsight_kwh.values()),
+                    "all_bounds_held": bool(held.all()),
+                    "zero_ceiling_cars": int(zero_ceiling.sum()),
+                    "zero_ceiling_cars_with_energy": int((zero_ceiling & with_energy).sum()),
+                    "zero_stay_cars": int((m.learned.deadline == 0).sum()),
+                    "exact_learned_kwh": float(
+                        np.mean([m.learned.band_width(k) for k in SIZE_CHECKPOINTS])
+                    ),
+                    "exact_true_kwh": exact_true,
+                    "solve_seconds": m.offer.seconds,
+                    "status": getattr(m.offer, "status", ""),
+                }
+            )
 
 
 def supported(level: float, levels: tuple[float, ...]) -> bool:

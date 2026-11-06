@@ -81,27 +81,37 @@ def run_one(data_root: str, name: str, form: str) -> dict:
     return out
 
 
-def run_all(data_root: Path, workers: int = 10, store: Path | None = None) -> list[dict]:
-    """Every run in RUNS. With `store`, each finished run is saved there as it ends and a run
-    already saved is read back instead of run again, so an interrupted call can be resumed."""
+def run_saved(fn, jobs: list[tuple], workers: int, store: Path | None = None) -> list:
+    """`fn(*job)` for every job, in parallel. With `store`, each finished job is saved there
+    as it ends and a job already saved is read back instead of run again, so an interrupted
+    call can be resumed."""
     store = Path(store) if store is not None else None
     if store is not None:
         store.mkdir(parents=True, exist_ok=True)
+
+    def path(job):
+        return store / ("-".join(str(part) for part in job[1:]) + ".pkl")
+
     done, todo = {}, []
-    for name, form in RUNS:
-        path = store / f"{name}-{form}.pkl" if store is not None else None
-        if path is not None and path.exists():
-            done[(name, form)] = pd.read_pickle(path)
+    for job in jobs:
+        if store is not None and path(job).exists():
+            done[job] = pd.read_pickle(path(job))
         else:
-            todo.append((name, form))
+            todo.append(job)
     with ProcessPoolExecutor(max_workers=workers) as pool:
-        futures = {pool.submit(run_one, str(data_root), n, f): (n, f) for n, f in todo}
+        futures = {pool.submit(fn, *job): job for job in todo}
         for future in as_completed(futures):
-            key = futures[future]
-            done[key] = future.result()
+            job = futures[future]
+            done[job] = future.result()
             if store is not None:
-                pd.to_pickle(done[key], store / f"{key[0]}-{key[1]}.pkl")
-    return [done[key] for key in RUNS]
+                pd.to_pickle(done[job], path(job))
+    return [done[job] for job in jobs]
+
+
+def run_all(data_root: Path, workers: int = 10, store: Path | None = None) -> list[dict]:
+    """Every run in RUNS (see `run_saved` for `store`)."""
+    jobs = [(str(data_root), name, form) for name, form in RUNS]
+    return run_saved(run_one, jobs, workers, store)
 
 
 def summary(runs: list[dict]) -> pd.DataFrame:
