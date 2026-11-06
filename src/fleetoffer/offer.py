@@ -44,8 +44,12 @@ TRIVIAL_BASE_KWH = 1e-7  # a base set with a smaller energy ceiling is treated a
 # Programme (24) is solved by HiGHS's interior-point method with crossover to a vertex; on
 # made-up fleets of 20 to 40 cars it is five times faster than its simplex method and gives
 # the same alpha. Which optimal gamma_i and Gamma_i it returns fixes the allocation of (31).
+# On a rare badly scaled day the interior-point method stops without an answer (HiGHS model
+# status unknown); the same programme is then solved by the dual simplex method, and the
+# offer's status says so.
 SOLVER = (
-    f"HiGHS (scipy {scipy.__version__} linprog), interior point with crossover, default tolerances"
+    f"HiGHS (scipy {scipy.__version__} linprog), interior point with crossover, default tolerances;"
+    " dual simplex if the interior-point method returns no answer"
 )
 
 
@@ -268,15 +272,18 @@ def solve(fleet: Fleet, base: BaseSet) -> Offer:
     objective[0] = -1.0
     a_ub = sparse.csr_array((vals_ub, (rows_ub, cols_ub)), shape=(nrow, nvar))
     a_eq = sparse.csr_array((vals_eq, (rows_eq, cols_eq)), shape=(neq, nvar)) if neq else None
-    result = linprog(
-        objective,
-        A_ub=a_ub,
-        b_ub=np.asarray(rhs_ub),
-        A_eq=a_eq,
-        b_eq=np.zeros(neq) if neq else None,
-        bounds=np.column_stack([lower, upper]),
-        method="highs-ipm",
-    )
+    problem = {
+        "A_ub": a_ub,
+        "b_ub": np.asarray(rhs_ub),
+        "A_eq": a_eq,
+        "b_eq": np.zeros(neq) if neq else None,
+        "bounds": np.column_stack([lower, upper]),
+    }
+    status = "optimal"
+    result = linprog(objective, method="highs-ipm", **problem)
+    if result.status != 0:
+        result = linprog(objective, method="highs-ds", **problem)
+        status = "optimal (dual simplex)"
     if result.status != 0:
         raise RuntimeError(f"programme (24) did not solve: {result.message}")
 
@@ -293,7 +300,7 @@ def solve(fleet: Fleet, base: BaseSet) -> Offer:
         big_gamma=big_gamma,
         base=base,
         seconds=time.perf_counter() - start,
-        status="optimal",
+        status=status,
     )
 
 

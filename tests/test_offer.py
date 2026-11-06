@@ -247,3 +247,26 @@ def test_a_base_set_with_a_negligible_ceiling_offers_nothing():
     fleet = Fleet.of([40, 20], [1e-9, 0.0])
     offer = solve(fleet, BaseSet.average(fleet))
     assert offer.alpha == 0.0 and offer.size() == 0.0
+
+
+def test_when_the_interior_point_method_gives_no_answer_dual_simplex_solves_the_same_programme(
+    monkeypatch,
+):
+    import fleetoffer.offer as offer_module
+
+    fleet = Fleet.of([20] * 4, [8.0] * 4)
+    expected = solve(fleet, BaseSet.average(fleet))
+    methods = []
+
+    def flaky(c, *, method, **problem):
+        methods.append(method)
+        result = linprog(c, method=method, **problem)
+        if method == "highs-ipm":
+            result.status = 4  # what scipy reports when HiGHS returns no answer
+        return result
+
+    monkeypatch.setattr(offer_module, "linprog", flaky)
+    offer = solve(fleet, BaseSet.average(fleet))
+    assert methods == ["highs-ipm", "highs-ds"]
+    assert offer.status == "optimal (dual simplex)"
+    assert offer.alpha == pytest.approx(expected.alpha, abs=1e-6)

@@ -551,7 +551,7 @@ def run_options(data_root: Path, out: Path, workers: int = 10) -> dict:
     out = Path(out)
     out.mkdir(parents=True, exist_ok=True)
     start = datetime.now(UTC)
-    runs = options.run_all(data_root, workers=workers)
+    runs = options.run_all(data_root, workers=workers, store=out / "runs")
     pd.concat([r["days"] for r in runs], ignore_index=True).to_csv(out / "days.csv.gz", index=False)
     logs = [r["log"] for r in runs if "log" in r]
     pd.concat(logs, ignore_index=True).to_csv(out / "logs.csv.gz", index=False)

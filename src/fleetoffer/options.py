@@ -11,7 +11,7 @@ base set, and the fallback. Nothing from September 2019 onward is read.
 
 from __future__ import annotations
 
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
 import pandas as pd
@@ -81,10 +81,27 @@ def run_one(data_root: str, name: str, form: str) -> dict:
     return out
 
 
-def run_all(data_root: Path, workers: int = 10) -> list[dict]:
-    names, forms = zip(*RUNS, strict=True)
+def run_all(data_root: Path, workers: int = 10, store: Path | None = None) -> list[dict]:
+    """Every run in RUNS. With `store`, each finished run is saved there as it ends and a run
+    already saved is read back instead of run again, so an interrupted call can be resumed."""
+    store = Path(store) if store is not None else None
+    if store is not None:
+        store.mkdir(parents=True, exist_ok=True)
+    done, todo = {}, []
+    for name, form in RUNS:
+        path = store / f"{name}-{form}.pkl" if store is not None else None
+        if path is not None and path.exists():
+            done[(name, form)] = pd.read_pickle(path)
+        else:
+            todo.append((name, form))
     with ProcessPoolExecutor(max_workers=workers) as pool:
-        return list(pool.map(run_one, [str(data_root)] * len(RUNS), names, forms))
+        futures = {pool.submit(run_one, str(data_root), n, f): (n, f) for n, f in todo}
+        for future in as_completed(futures):
+            key = futures[future]
+            done[key] = future.result()
+            if store is not None:
+                pd.to_pickle(done[key], store / f"{key[0]}-{key[1]}.pkl")
+    return [done[key] for key in RUNS]
 
 
 def summary(runs: list[dict]) -> pd.DataFrame:
