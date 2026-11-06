@@ -107,6 +107,22 @@ to August 2019:
 | Spread, registered rule | Every learned and population offer zero, so the spread is zero | No reading of H1's 10% is possible under the registered rule |
 | Spread, secondary analysis | Day-average base set, calibrated on delivery: weekly difference sd 0.36 kWh, projected standard error over 26 weeks 0.071 kWh, 10% of the population offer 0.155 kWh | No threshold reset |
 
+## Registered and not run
+
+Three sensitivities of the analysis plan (Section 3) are not run. This was decided before the
+tag, before any result from September 2019 onward existed, for the reasons given; each is a
+limitation of the results.
+
+| Sensitivity | Why it is not run |
+|---|---|
+| A required-energy floor per car at an upper quantile of its energy need, with the share of learned sets that are then empty | It needs a second per-car set form (a floor on the energy given by the deadline) with its own inner approximation, allocation and delivery checks; not built in the time available. A floor can only shrink the offer |
+| Total offered power capped at a stated share of the car park's panel rating | The panel rating is not in the data and no source for it was found; the shared supply limit is not modelled |
+| The cohort with a typed energy request before 10:00, scored on the remaining request | It needs a second energy target through the engine, the learned model and the population rule; not built in the time available. Check D7 found recorded energy an inadequate proxy for the driver's need (median ratio of recorded to requested energy 0.64), so every energy bound here bounds energy shaped by the site's scheduler |
+
+At JPL the level sweep is run on the one-dimensional fallback offer only (above). If the runs
+after the tag cannot all end in time, the secondary analysis in JPL's second track is the first
+run left out, and is then reported as not run.
+
 ## Added after the first fleet run (May to August 2019)
 
 The registered day-level rule gave a learned offer of zero on every scored weekday of May to
@@ -122,6 +138,7 @@ exploratory. The registered design stays the primary result.
 | Hindsight ceiling | The sweep's curve with hindsight delivery: the largest offer of the form that a per-request split chosen with hindsight could deliver; an upper bound, not a method that could be deployed, and not the registered service | `levels.table` |
 | Matched comparison | Per model and form, the largest mean offer among the swept levels delivered on at least 90% (and 95%) of scored weekdays, with no interpolation | `levels.matched` |
 | Diagnostic, empty cars known | The sweep when the cars that truly take nothing after 10:00 (at most 10⁻⁹ kWh, check D4's zero) are known and dropped, and the per-car models are refitted on car-days that took energy; a perfect-knowledge yardstick for live charging status at 10:00, not a method that could be deployed | `LevelSweep(drop_empty=True)`, `fleet_replay(reveal_empty=True)` |
+| Zero ceilings at small levels | A proposition (`docs/theory.md`) stated after the first fleet run and before the sweep's counts were read: a lower bound at level q is zero exactly when the car's chance of taking nothing is at least q. Its readings, the share of cars with a zero ceiling at each level, with and without the empty cars known, beside the offer, are reported for May to August 2019 and every later period | `levels.table` (`zero_ceiling_share`, `zero_ceiling_share_with_energy`) |
 | Rehearsal | Every run after the tag was first run end to end on Caltech development data (June to August 2019); its numbers are not results | `fleetoffer evaluate rehearsal-*` |
 
 **h₀, the base set's power limit (kW) at the start of each 15-minute step**, from every car

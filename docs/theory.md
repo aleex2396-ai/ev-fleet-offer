@@ -145,6 +145,72 @@ which no present car's learned set reaches a late step at which training cars co
 the offer is the single profile p. How often this happens is measured for every arm on
 development data before the tag, beside the paper's own day-average base set.
 
+## Zero ceilings at small levels
+
+The day-level rules give every present car its two bounds at one shared level q, and the
+level they need is small: the union bound uses q = α/(2n), 0.29% for α = 0.10 and the median
+of 17.5 cars present at 10:00 on the scored weekdays of May to August 2019. At this site the
+energy a car will still take after 10:00 has an atom at zero: by check D4, 16.4% of the
+9,128 car-days at 10:00 through August 2019 take nothing more (an estimate of at most
+10⁻⁹ kWh). This section states what that atom does to a lower bound at a small level. It was
+written after the first fleet run showed offers near zero on those months and before the
+level sweep's counts of zero ceilings were read; the sweep is its check.
+
+**Setting.** Car i has remaining energy Eᵢ ≥ 0 in the horizon and inputs Xᵢ known at 10:00.
+Write Fᵢ(e) = P(Eᵢ ≤ e | Xᵢ) and πᵢ = Fᵢ(0) = P(Eᵢ = 0 | Xᵢ), the chance, given what is known
+at 10:00, that the car takes nothing more. Its lower bound at level q is the q-quantile
+êᵢ(q) = inf{e ≥ 0 : Fᵢ(e) ≥ q}.
+
+**Proposition.** êᵢ(q) = 0 if and only if πᵢ ≥ q.
+
+*Proof.* If πᵢ ≥ q, then 0 belongs to the set {e : Fᵢ(e) ≥ q}, and Eᵢ ≥ 0, so êᵢ(q) = 0.
+If πᵢ < q, then Fᵢ(0) < q and Fᵢ is right-continuous, so Fᵢ(ε) < q for some ε > 0; every e in
+the set is then larger than ε, and êᵢ(q) ≥ ε > 0. ∎
+
+**How it applies to the rules here.** The population and stratified rules give empirical
+quantiles of past sessions (`numpy.quantile` with the inverted distribution function, which is
+the definition above), so on the grid of levels the proposition holds exactly with πᵢ the
+share of the car's reference sessions that took nothing. Off the grid a bound is interpolated
+linearly between the neighbouring grid levels (and is 0 below the lowest, 0.002), so at a level
+between two grid levels the ceiling is zero exactly when the reference share is at least the
+upper of the two. The boosted trees estimate the conditional quantile by pinball loss, and
+the proposition holds for them only as far as their estimate is the conditional quantile. The
+same argument applies to the deadline: the bound in whole steps is zero when the chance of
+leaving within the first 15 minutes is at least q (up to a boundary case at exactly 15
+minutes).
+
+**Consequence for the offer.** Learned sets are charging-only, so the band width of their sum
+at any step is the sum of the cars' own widths, and a car whose ceiling or deadline is zero
+adds nothing. The offered set lies inside the sum of the learned sets. So the programme's
+offer, whose size is its band width at the checkpoints, is at most the exact band width of the
+learned fleet there (`exact_learned_kwh` in every run); the one-dimensional offer's amplitude
+is at most half that width at 11:00, since its two ends differ by twice the amplitude in
+cumulative energy at 11:00. Either way only cars with πᵢ < q (and a positive deadline)
+contribute. At q = 0.29% a car adds to the offer only if the inputs at 10:00 rule out, to
+within 0.29%, that it will take nothing more. With 16.4% of car-days empty, that needs inputs
+that separate the empty cars from the others almost perfectly. The containment proposition
+above holds at every level; it assumes the bounds hold, not that they are informative. At
+this atom and these levels, the bounds that hold are zero for most cars, so what is contained
+is small.
+
+**What would change it.** Information at 10:00 that settles whether a car is still charging
+removes the atom from the cars that are: their πᵢ becomes near zero and their ceilings at small
+levels positive. A real operator observes this (subject to the site's own scheduler, check
+D7); the data here do not record it at 10:00. The level sweep's diagnostic, in which the cars
+that take nothing are known and the models are refitted on car-days that took energy, is the
+perfect-knowledge yardstick for it.
+
+**How it is checked.** In the level sweep, for each model, offer form and level: the share of
+cars given a zero ceiling, also among the cars that did take energy, beside the offer size and
+its delivery; and the same with the empty cars known. The proposition predicts a zero-ceiling
+share that is large at the small levels the day-level rules reach and falls as the level rises,
+and a much smaller share once the empty cars are known. It does not predict how much of the
+offer the diagnostic recovers: if knowing the empty cars leaves the offer at matched delivery
+far below the perfect-knowledge offer, the atom at zero is not the main reason for the gap, and
+the remaining reasons (the deadline bounds, the common template, the allocation fixed at 10:00)
+are read from the sweep and the hindsight split. These readings are registered for every later
+period (`docs/registration.md`).
+
 ## How a day's offer is checked
 
 The nine profiles drawn from p + αU₀ (analysis plan, Section 3) are p + αu₀ for these points
