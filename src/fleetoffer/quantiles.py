@@ -30,13 +30,19 @@ Econometrica 78(3)).
 
 from __future__ import annotations
 
+import fcntl
+import hashlib
+import os
+import pickle
 import time
 import warnings
 from collections.abc import Callable
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import sklearn
 from scipy.special import expit
 from sklearn.ensemble import HistGradientBoostingRegressor
 from sklearn.linear_model import QuantileRegressor
@@ -186,6 +192,44 @@ class Design:
 
 # The learned families.
 
+# Arms that share a per-car model fit the same trees on the same rows at the same refits, so
+# a run may keep each fit once: with FIT_STORE set to a folder, a fit is saved there under a
+# fingerprint of the model's settings and of every training row (values, columns and types),
+# and a later fit with the same fingerprint reads it back. A lock per fingerprint makes
+# parallel jobs wait for the first fit instead of repeating it. Unset, nothing is kept.
+FIT_STORE = "FLEETOFFER_FIT_STORE"
+
+
+def fit_fingerprint(model: QuantileModel, train: pd.DataFrame) -> str:
+    """A hash of the model's class and settings, the library version and every training row."""
+    digest = hashlib.sha256()
+    digest.update(type(model).__name__.encode())
+    digest.update(repr(sorted(asdict(model).items())).encode())
+    digest.update(sklearn.__version__.encode())
+    digest.update(repr([(c, str(t)) for c, t in train.dtypes.items()]).encode())
+    digest.update(pd.util.hash_pandas_object(train, index=False).to_numpy().tobytes())
+    return digest.hexdigest()
+
+
+def stored_fit(model: QuantileModel, train: pd.DataFrame, fit: Callable[[], dict]) -> dict:
+    """`fit()`'s fitted state, read from the fit store if this exact fit was made before."""
+    folder = os.environ.get(FIT_STORE)
+    if not folder:
+        return fit()
+    folder = Path(folder)
+    folder.mkdir(parents=True, exist_ok=True)
+    key = fit_fingerprint(model, train)
+    path = folder / f"{key}.pkl"
+    with open(folder / f"{key}.lock", "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if path.exists():
+            return pickle.loads(path.read_bytes())
+        state = fit()
+        partial = path.with_suffix(".partial")
+        partial.write_bytes(pickle.dumps(state))
+        partial.replace(path)
+        return state
+
 
 @dataclass
 class GBDT(QuantileModel):
@@ -200,13 +244,17 @@ class GBDT(QuantileModel):
     name: str = "gbdt"
 
     def fit(self, train, ended, origin):
-        self.design = Design(train, one_hot=False)
-        x = self.design(train)
+        state = stored_fit(self, train, lambda: self._fit(train))
+        self.design, self.models = state["design"], state["models"]
+
+    def _fit(self, train) -> dict:
+        design = Design(train, one_hot=False)
+        x = design(train)
         cat = np.zeros(x.shape[1], dtype=bool)
         cat[-1] = True
-        self.models = {}
+        models = {}
         for target, y in targets(train).items():
-            self.models[target] = [
+            models[target] = [
                 HistGradientBoostingRegressor(
                     loss="quantile",
                     quantile=float(q),
@@ -214,12 +262,13 @@ class GBDT(QuantileModel):
                     max_leaf_nodes=self.max_leaf_nodes,
                     min_samples_leaf=self.min_samples_leaf,
                     max_iter=self.max_iter,
-                    categorical_features=cat if len(self.design.stations) else None,
+                    categorical_features=cat if len(design.stations) else None,
                     early_stopping=False,
                     random_state=self.seed,
-                ).fit(x if len(self.design.stations) else x[:, :-1], y)
+                ).fit(x if len(design.stations) else x[:, :-1], y)
                 for q in LEVELS
             ]
+        return {"design": design, "models": models}
 
     def predict(self, day, feats):
         x = self.design(feats)

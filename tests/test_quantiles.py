@@ -312,3 +312,52 @@ def test_the_offer_from_learned_bounds_does_not_look_ahead(claimed):
 
     cutoff = first + pd.Timedelta(days=37, hours=19)
     assert check_no_lookahead_days(factory, short, [cutoff], entries=entries) > 20
+
+
+def test_a_stored_tree_fit_is_read_back_and_predicts_the_same(tmp_path, monkeypatch):
+    from fleetoffer import quantiles
+
+    rng = np.random.default_rng(0)
+    n = 300
+    train = pd.DataFrame(
+        {
+            "station": rng.choice(["a", "b", "c"], n),
+            "elapsed_h": rng.uniform(0, 5, n),
+            "target_stay_h": rng.uniform(0, 10, n),
+            "target_energy_kwh": rng.uniform(0, 20, n),
+        }
+    )
+    monkeypatch.setattr(quantiles, "Design", _OneColumn)
+    monkeypatch.setenv(quantiles.FIT_STORE, str(tmp_path))
+    first, second = quantiles.GBDT(max_iter=5), quantiles.GBDT(max_iter=5)
+    first.fit(train, None, None)
+    files = sorted(tmp_path.glob("*.pkl"))
+    assert len(files) == 1
+    calls = []
+    monkeypatch.setattr(quantiles.GBDT, "_fit", lambda self, t: calls.append(1))
+    second.fit(train, None, None)
+    assert calls == []
+    for target in ("stay", "energy"):
+        for a, b in zip(first.models[target], second.models[target], strict=True):
+            x = np.column_stack([train["elapsed_h"], np.zeros(n)])
+            assert np.array_equal(a.predict(x), b.predict(x))
+    third = quantiles.GBDT(max_iter=6)  # other settings: a new fit
+    monkeypatch.undo()
+    monkeypatch.setattr(quantiles, "Design", _OneColumn)
+    monkeypatch.setenv(quantiles.FIT_STORE, str(tmp_path))
+    third.fit(train, None, None)
+    assert len(sorted(tmp_path.glob("*.pkl"))) == 2
+    changed = train.assign(elapsed_h=train["elapsed_h"] + 1e-9)  # other rows: a new fit
+    quantiles.GBDT(max_iter=5).fit(changed, None, None)
+    assert len(sorted(tmp_path.glob("*.pkl"))) == 3
+
+
+class _OneColumn:
+    """A stand-in for the design: one numeric column and a station code."""
+
+    def __init__(self, train, one_hot=False):
+        self.stations = ["a", "b", "c"]
+
+    def __call__(self, frame):
+        code = frame["station"].map({"a": 0, "b": 1, "c": 2}).to_numpy(float)
+        return np.column_stack([frame["elapsed_h"].to_numpy(float), code])

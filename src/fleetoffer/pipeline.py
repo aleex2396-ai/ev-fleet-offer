@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import platform
 import subprocess
 from datetime import UTC, datetime
@@ -33,6 +34,7 @@ from fleetoffer import (
     offer,
     options,
     percar,
+    quantiles,
 )
 from fleetoffer.engine import Daily, Oracle, energy_in_window, fleet_replay, replay
 from fleetoffer.features import LOCAL_TZ
@@ -638,6 +640,7 @@ def run_evaluation(
     out = Path(out)
     out.mkdir(parents=True, exist_ok=True)
     start = datetime.now(UTC)
+    os.environ[quantiles.FIT_STORE] = str(out / "fits")  # this run's own store of tree fits
     runs = evaluation.run_period(
         period, data_root, unseal=unseal, workers=workers, store=out / "runs"
     )
