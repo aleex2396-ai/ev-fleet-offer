@@ -303,7 +303,7 @@ def _view(
     return DayView(t, now.reset_index(drop=True), past.reset_index(drop=True), typed)
 
 
-def _steps(hours: np.ndarray, step_h: float, steps: int) -> np.ndarray:
+def to_steps(hours: np.ndarray, step_h: float, steps: int) -> np.ndarray:
     """Hours to whole steps, rounded down (a small tolerance absorbs float error)."""
     return np.clip(np.floor(np.asarray(hours, dtype=float) / step_h + 1e-9), 0, steps).astype(int)
 
@@ -323,7 +323,7 @@ def true_fleet(table: pd.DataFrame, t_h: float, rows: np.ndarray, *, cap, steps,
         t_h,
         t_h + horizon_h,
     )
-    deadline = _steps(np.minimum(disconnect - t_h, horizon_h), step_h, steps)
+    deadline = to_steps(np.minimum(disconnect - t_h, horizon_h), step_h, steps)
     return Fleet.of(deadline, energy, cap=cap, steps=steps, step_h=step_h)
 
 
@@ -428,7 +428,7 @@ def fleet_replay(
             if (stay_h < 0).any() or (energy < 0).any():
                 raise ValueError(f"{rule.name} gave a negative bound")
             learned = Fleet.of(
-                _steps(np.minimum(stay_h, horizon_h), step_h, steps), energy, cap, steps, step_h
+                to_steps(np.minimum(stay_h, horizon_h), step_h, steps), energy, cap, steps, step_h
             )
 
         offer = None

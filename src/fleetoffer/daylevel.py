@@ -31,19 +31,37 @@ smallest of their scores, k = floor(a (n + 1)); the trivial bound (deadline at 1
 **Arm 3, the union bound.** Each car's two bounds at level 0.10 / (2n) for n present cars.
 Where check D10 does not support a level (a level between two grid levels needs both), that
 bound is the trivial one, and the cars given it are counted.
+
+**Calibration on delivery** (`DeliveryCalibrated`, measured on the model-selection months, not
+part of the registered design). The same rules, with a different day score: the largest level
+of `DELIVERY_LEVELS` such that the day's offer, made again once the day's outcome is known from
+the bounds the model gave that morning, was delivered under the allocation fixed at 10:00 at
+that level and at every lower one. A day on which the offer at the level used was not
+delivered has a score below that level, so the share of failed days the rule controls is at
+least the share of days not delivered.
 """
 
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
 
-from fleetoffer.engine import ENERGY_REMAINING_KWH
+from fleetoffer.engine import ENERGY_REMAINING_KWH, to_steps
 from fleetoffer.interface import DayOutcome, DayView, FleetRule
-from fleetoffer.offer import STEP_H, STEPS
+from fleetoffer.offer import (
+    CAP_KW,
+    DELIVERY_TOL_KWH,
+    STEP_H,
+    STEPS,
+    Fleet,
+    Offer,
+    SegmentOffer,
+    fixed_shortfall,
+)
 from fleetoffer.quantiles import LEVELS, PerCarRule
 
 GRID = np.concatenate([[0.0], np.round(np.arange(0.002, 0.95 + 1e-9, 0.001), 3)])
@@ -227,6 +245,10 @@ class Calibrated(FleetRule):
         self._pending[day.decision_time] = _Pending(stay, energy, level, used, fitted, self.miss)
         return tuple(np.nan_to_num(at_levels(p, level), nan=0.0) for p in (stay, energy))
 
+    def _score(self, day: _Pending, outcome: DayOutcome) -> tuple[float, dict]:
+        """The day's score, and anything to log beside it."""
+        return day_score(day.stay, day.energy, outcome.true_deadline, outcome.true_energy), {}
+
     def observe(self, outcome: DayOutcome) -> None:
         self.per_car.observe(outcome)
         day = self._pending.pop(outcome.decision_time)
@@ -239,14 +261,89 @@ class Calibrated(FleetRule):
             "fitted": day.fitted,
         }
         if day.fitted:
-            score = day_score(day.stay, day.energy, outcome.true_deadline, outcome.true_energy)
+            score, extra = self._score(day, outcome)
             scored = is_scored(outcome.true_energy)
             failed = day.level > score
-            row |= {"score": score, "scored": scored, "failed": failed}
+            row |= {"score": score, "scored": scored, "failed": failed} | extra
             if scored:
                 self.scores.append((outcome.decision_time, score))
                 self.miss += self.gamma * (self.target - float(failed))
         self.log.append(row)
+
+
+DELIVERY_LEVELS = np.concatenate([[0.0], LEVELS])  # the levels at which a day is made again
+MakeOffer = Callable[[Fleet], Offer | SegmentOffer]
+
+
+def fleet_at(
+    stay: np.ndarray,
+    energy: np.ndarray,
+    level: float,
+    *,
+    cap: float = CAP_KW,
+    steps: int = STEPS,
+    step_h: float = STEP_H,
+) -> Fleet:
+    """The learned sets at one shared level, as the engine builds them from the bounds."""
+    stay_h = np.nan_to_num(at_levels(stay, level), nan=0.0)
+    ceiling = np.nan_to_num(at_levels(energy, level), nan=0.0)
+    deadline = to_steps(np.minimum(stay_h, steps * step_h), step_h, steps)
+    return Fleet.of(deadline, ceiling, cap, steps, step_h)
+
+
+def fixed_delivered(offer: Offer | SegmentOffer, true: Fleet) -> bool:
+    """The primary check alone: every checked profile delivered under the allocation fixed at
+    the decision time (`offer.check_delivery`, without the hindsight split)."""
+    return all(
+        float(fixed_shortfall(allocation, true).sum()) <= DELIVERY_TOL_KWH
+        for _, allocation in offer.checked().values()
+    )
+
+
+def delivery_score(
+    stay: np.ndarray,
+    energy: np.ndarray,
+    true: Fleet,
+    make_offer: MakeOffer,
+    levels: np.ndarray = DELIVERY_LEVELS,
+    cap: float = CAP_KW,
+) -> tuple[float, int]:
+    """The largest of `levels` at which the offer, and the offer at every lower one, was
+    delivered under the fixed allocation; and how many offers were made to find it. Level 0
+    gives the trivial sets, whose offer charges nothing and is always delivered."""
+    for k, level in enumerate(levels):
+        learned = fleet_at(stay, energy, level, cap=cap, steps=true.steps, step_h=true.step_h)
+        if not fixed_delivered(make_offer(learned), true):
+            return float(levels[max(k - 1, 0)]), k + 1
+    return float(levels[-1]), len(levels)
+
+
+class DeliveryCalibrated(Calibrated):
+    """Arms 4, 5 and 6 calibrated on delivery (module docstring): the day's score is the
+    largest level at which `make_offer`, applied to that morning's bounds, was delivered.
+    `make_offer` must be the offer the engine makes on the same days."""
+
+    def __init__(
+        self,
+        per_car: PerCarRule,
+        make_offer: MakeOffer,
+        *,
+        levels: np.ndarray = DELIVERY_LEVELS,
+        cap: float = CAP_KW,
+        name: str | None = None,
+        **kwargs,
+    ) -> None:
+        super().__init__(per_car, name=name, **kwargs)
+        if name is None:
+            self.name = f"{per_car.name}+{self.rule}+delivery"
+        self.make_offer, self.levels, self.cap = make_offer, np.asarray(levels, float), cap
+
+    def _score(self, day: _Pending, outcome: DayOutcome) -> tuple[float, dict]:
+        true = Fleet.of(outcome.true_deadline, outcome.true_energy, self.cap)
+        score, offers = delivery_score(
+            day.stay, day.energy, true, self.make_offer, self.levels, self.cap
+        )
+        return score, {"offers_made": offers}
 
 
 def supported(level: float, levels: tuple[float, ...]) -> bool:

@@ -5,18 +5,21 @@ import pytest
 from fleetoffer.baselines import Population
 from fleetoffer.checks import check_no_lookahead_days
 from fleetoffer.daylevel import (
+    DELIVERY_LEVELS,
     GRID,
     Calibrated,
+    DeliveryCalibrated,
     UnionBound,
     at_levels,
     conformal_level,
     day_score,
+    delivery_score,
     held_level,
     is_scored,
     supported,
 )
 from fleetoffer.engine import fleet_replay
-from fleetoffer.offer import STEP_H, STEPS
+from fleetoffer.offer import STEP_H, STEPS, BaseSet, Fleet, solve, solve_segment
 from fleetoffer.quantiles import GBDT, LEVELS, PerCarRule, at_level
 from fleetoffer.synthetic import Regime, make_sessions, with_app_entries
 
@@ -220,3 +223,73 @@ def test_failed_days_stay_within_the_bound_even_against_the_worst_days():
     assert np.mean(failed[late]) <= aci_failure_bound(116, start=levels[100])
     assert np.mean(failed[late]) > aci_failure_bound(116)  # ... which a_1 alone would not give
     assert np.mean(failed) > 0.10  # the worst case does push it above the target
+
+
+# Calibration on delivery (measured on the model-selection months; not the registered rule).
+
+
+def one_car(true_energy=4.0):
+    """One car staying past 20:00 whose energy bound at level q is 10 q kWh."""
+    stay = np.full((1, len(LEVELS)), 12.0)
+    energy = 10.0 * np.asarray(LEVELS, dtype=float)[None, :]
+    return stay, energy, Fleet.of([STEPS], [true_energy])
+
+
+def test_with_the_cars_own_set_as_template_delivery_fails_once_a_bound_fails():
+    stay, energy, true = one_car()
+    score, made = delivery_score(stay, energy, true, lambda f: solve(f, BaseSet.average(f)))
+    assert score == pytest.approx(0.4)  # 10 q <= 4 kWh
+    assert made == list(DELIVERY_LEVELS).index(0.5) + 1  # stops at the first failure
+    assert day_score(stay, energy, true.deadline, true.energy) == pytest.approx(0.4)
+
+
+def test_the_fallback_offer_is_delivered_past_a_failed_energy_bound():
+    # The fallback's reference charges half the ceiling and its shift moves no energy, so
+    # with one car it asks 5 q kWh: delivered up to q = 0.8, though the bound fails above 0.4.
+    stay, energy, true = one_car()
+    score, _ = delivery_score(stay, energy, true, solve_segment)
+    assert score == pytest.approx(0.8)
+    assert day_score(stay, energy, true.deadline, true.energy) == pytest.approx(0.4)
+
+
+def test_an_offer_delivered_at_every_level_scores_the_top():
+    stay, energy, true = one_car(true_energy=20.0)
+    assert delivery_score(stay, energy, true, solve_segment) == (DELIVERY_LEVELS[-1], 17)
+
+
+def test_delivery_calibrated_rule_in_the_engine(claimed):
+    sessions, entries = claimed
+    rule = DeliveryCalibrated(
+        PerCarRule([Population()], min_rows=50, calendar=no_flags), solve_segment, gamma=0.05
+    )
+    days = fleet_replay(sessions, rule, method="segment", entries=entries).days
+    log = pd.DataFrame(rule.log)
+    scored = log[log["fitted"]]
+    assert len(scored) > 40
+    assert scored["score"].isin(DELIVERY_LEVELS).all()
+    for _, row in scored.iterrows():
+        expect = conformal_level(_known_scores(log, row["decision_time"]), row["miss_at_decision"])
+        assert row["level"] == pytest.approx(min(expect, GRID[-1]))
+    # every day the engine's offer was not delivered counts as failed (the converse need not
+    # hold: a lower level may have failed while the level used did not)
+    merged = scored.merge(days[["decision_time", "fixed_delivered"]], on="decision_time")
+    failed = merged["failed"].astype(bool)
+    assert failed[~merged["fixed_delivered"].astype(bool)].all()
+    assert ((merged["level"] <= merged["score"]) == ~failed).all()
+    counted = log[log["scored"].fillna(False).astype(bool)]
+    expected = 0.10 + 0.05 * (0.10 - counted["failed"].astype(float)).sum()
+    assert rule.miss == pytest.approx(expected)
+
+
+def test_the_delivery_calibrated_offer_does_not_look_ahead(claimed):
+    sessions, entries = claimed
+    first = sessions["connect_time"].min()
+    short = sessions[sessions["connect_time"] < first + pd.Timedelta(days=50)]
+
+    def factory(table):
+        per_car = PerCarRule([GBDT(max_iter=10)], min_rows=50, calendar=no_flags)
+        return DeliveryCalibrated(per_car, solve_segment, gamma=0.2)
+
+    cutoff = first + pd.Timedelta(days=47, hours=19)
+    compared = check_no_lookahead_days(factory, short, [cutoff], entries=entries, method="segment")
+    assert compared > 25

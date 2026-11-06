@@ -22,7 +22,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from fleetoffer import __version__, acn, calibrate, data, devchecks, offer, percar
+from fleetoffer import __version__, acn, calibrate, data, devchecks, offer, options, percar
 from fleetoffer.engine import Daily, Oracle, energy_in_window, fleet_replay, replay
 from fleetoffer.figures import plot_monthly
 from fleetoffer.models import FrozenQuantile, RollingQuantile
@@ -545,6 +545,34 @@ def run_checks(data_root: Path, out: Path, workers: int = 9) -> dict:
     return manifest
 
 
+def run_options(data_root: Path, out: Path, workers: int = 10) -> dict:
+    """Day-level calibration on delivery and the fallback offer, on the model-selection months
+    only (`options`). Everything here is computed from offers."""
+    out = Path(out)
+    out.mkdir(parents=True, exist_ok=True)
+    start = datetime.now(UTC)
+    runs = options.run_all(data_root, workers=workers)
+    pd.concat([r["days"] for r in runs], ignore_index=True).to_csv(out / "days.csv.gz", index=False)
+    logs = [r["log"] for r in runs if "log" in r]
+    pd.concat(logs, ignore_index=True).to_csv(out / "logs.csv.gz", index=False)
+    options.summary(runs).to_csv(out / "summary.csv", index=False)
+    (out / "spread.json").write_text(
+        json.dumps(_json(options.spreads(runs)), indent=2, default=str)
+    )
+    manifest = {
+        "run": "options",
+        "made_at_utc": start.isoformat(timespec="seconds"),
+        "package_version": __version__,
+        "code": _git_state(),
+        "python": platform.python_version(),
+        "seconds": (datetime.now(UTC) - start).total_seconds(),
+        "runs": [list(r) for r in options.RUNS],
+        "chosen": percar.CHOSEN,
+    }
+    (out / "manifest.json").write_text(json.dumps(_json(manifest), indent=2, default=str))
+    return manifest
+
+
 def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
@@ -628,6 +656,14 @@ def main(argv: list[str] | None = None) -> int:
     dev.add_argument("--out", type=Path, default=Path("results/checks"))
     dev.add_argument("--workers", type=int, default=9)
 
+    opts = commands.add_parser(
+        "options",
+        help="day-level calibration on delivery and the fallback offer, May to August 2019",
+    )
+    opts.add_argument("--data", type=Path, default=Path("data"))
+    opts.add_argument("--out", type=Path, default=Path("results/options"))
+    opts.add_argument("--workers", type=int, default=10)
+
     commands.add_parser(
         "requirements",
         help="days the 2022 drift theorem needs for a 90%%-of-days offer, beside the days held",
@@ -700,6 +736,9 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "checks":
         manifest = run_checks(args.data, args.out, workers=args.workers)
         print(f"wrote the checks to {args.out} in {manifest['seconds']:.0f} s")
+    elif args.command == "options":
+        manifest = run_options(args.data, args.out, workers=args.workers)
+        print(f"wrote the options to {args.out} in {manifest['seconds']:.0f} s")
     elif args.command == "requirements":
         print(calibrate.requirements_table().to_string(index=False))
         print()
