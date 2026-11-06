@@ -84,7 +84,7 @@ src/fleetoffer/
 tests/            unit tests, including the look-ahead tests (no network needed)
 fingerprints/     SHA-256 of every downloaded month
 docs/             analysis plan, what the tag fixes (registration), data notes, theory with theorem
-                  statements, earlier looks, discovery log
+                  statements, earlier looks, written predictions, discovery log
 ```
 
 ## References
