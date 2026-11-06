@@ -178,3 +178,88 @@ def matched(levels: pd.DataFrame, rates=MATCHED_DELIVERY) -> pd.DataFrame:
                     }
                 )
     return pd.DataFrame(rows)
+
+
+ACCOUNTING_RATE = 0.90
+ACCOUNTING_STEPS = (
+    ("exact band of the true sets", "a ceiling: each checkpoint maximised apart"),
+    ("perfect knowledge", "the oracle's offer: the inner approximation's own loss"),
+    (
+        "forecasts at 90% delivery",
+        "best swept level delivered on 90% of days; level chosen with hindsight",
+    ),
+    ("empty cars known", "the same, with the cars that take nothing known; a yardstick"),
+    (
+        "hindsight split at 90%",
+        "the same, delivered by a split chosen with hindsight; an upper bound",
+    ),
+    ("day-level rule as run", "the level chosen online from past days"),
+)
+
+
+def accounting(
+    table: pd.DataFrame,
+    oracle: pd.DataFrame,
+    online: pd.DataFrame,
+    rate: float = ACCOUNTING_RATE,
+) -> pd.DataFrame:
+    """Where the perfect-knowledge offer goes, per offer form: the exact band of the true sets
+    (programme forms only, a ceiling no single offer need reach), the oracle's offer, the
+    largest swept offer of each model delivered on `rate` of days under the fixed allocation,
+    the same with the empty cars known and with a split chosen with hindsight, and each
+    day-level rule as run. Every row is compared at its own delivery rate, shown beside it.
+
+    `table` is `table`'s output; `oracle` has one row per form (`form`, `size_mean_kwh`,
+    `fixed_delivered`, `exact_true_kwh`); `online` one row per day-level arm (`arm`, `form`,
+    `size_mean_kwh`, `fixed_delivered`)."""
+    best = matched(table, rates=(rate,))
+    notes = dict(ACCOUNTING_STEPS)
+    rows = []
+    for form in sorted(set(table["form"]) | set(oracle["form"]) | set(online["form"])):
+        mine = oracle[oracle["form"] == form]
+        perfect = float(mine["size_mean_kwh"].iloc[0]) if len(mine) else np.nan
+
+        def add(
+            step,
+            who,
+            size,
+            delivered,
+            level=np.nan,
+            measure="fixed_delivered",
+            form=form,
+            perfect=perfect,
+        ):
+            share = size / perfect if perfect > 1e-9 else np.nan
+            rows.append(
+                {
+                    "form": form,
+                    "step": step,
+                    "who": who,
+                    "size_mean_kwh": float(size),
+                    "share_of_perfect": share,
+                    "delivered": float(delivered),
+                    "measure": measure,
+                    "level": float(level),
+                    "note": notes[step],
+                }
+            )
+
+        if len(mine) and form != "segment":
+            add("exact band of the true sets", "1", mine["exact_true_kwh"].iloc[0], np.nan)
+        if len(mine):
+            add("perfect knowledge", "1", perfect, mine["fixed_delivered"].iloc[0])
+        for step, models, measure in (
+            ("forecasts at 90% delivery", MODELS, "fixed_delivered"),
+            ("empty cars known", [f"{m}k" for m in MODELS], "fixed_delivered"),
+            ("hindsight split at 90%", MODELS, "hindsight_delivered"),
+        ):
+            for model in models:
+                row = best[
+                    (best["form"] == form) & (best["model"] == model) & (best["measure"] == measure)
+                ]
+                if len(row):
+                    r = row.iloc[0]
+                    add(step, model, r["size_mean_kwh"], r["achieved"], r["level"], measure)
+        for _, r in online[online["form"] == form].iterrows():
+            add("day-level rule as run", r["arm"], r["size_mean_kwh"], r["fixed_delivered"])
+    return pd.DataFrame(rows)

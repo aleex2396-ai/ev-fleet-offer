@@ -616,6 +616,18 @@ def run_levels(data_root: Path, out: Path, workers: int = 10) -> dict:
     return manifest
 
 
+def run_accounting(levels_dir: Path, options_dir: Path, out: Path) -> pd.DataFrame:
+    """The accounting of the perfect-knowledge offer on the model-selection months, from the
+    level sweep (`results/levels/`) and the options run (`results/options/`)."""
+    table = pd.read_csv(Path(levels_dir) / "table.csv", dtype={"model": str})
+    oracle = pd.read_csv(Path(levels_dir) / "oracle.csv")
+    summary = pd.read_csv(Path(options_dir) / "summary.csv", dtype={"arm": str})
+    online = summary[summary["arm"] != "1"]
+    frame = levels.accounting(table, oracle, online)
+    frame.to_csv(Path(out) / "accounting.csv", index=False)
+    return frame
+
+
 def run_evaluation(
     period: str, data_root: Path, out: Path, *, unseal: bool = False, workers: int = 10
 ) -> dict:
@@ -642,7 +654,11 @@ def run_evaluation(
     levels.table(sweep, first).to_csv(out / "sweep_table.csv", index=False)
     levels.matched(levels.table(sweep, first)).to_csv(out / "sweep_matched.csv", index=False)
     scored = evaluation.scored_days(days, first)
-    evaluation.arm_summary(scored).to_csv(out / "summary.csv", index=False)
+    summary = evaluation.arm_summary(scored)
+    summary.to_csv(out / "summary.csv", index=False)
+    evaluation.accounting(summary, levels.table(sweep, first)).to_csv(
+        out / "accounting.csv", index=False
+    )
     evaluation.monthly(scored).to_csv(out / "monthly.csv", index=False)
     predictions = {r["name"]: r["predictions"] for r in arms if "predictions" in r}
     for name, frame in predictions.items():
@@ -798,7 +814,19 @@ def run_report(results: Path, out: Path, *, rehearsal: bool = False) -> dict:
         )
     )
 
-    table = results_table(hyp)
+    accounts = [
+        _read(folders[p], "accounting.csv").assign(period=p)
+        for p in ("evaluation", "sealed", "jpl")
+    ]
+    accounts.append(
+        evaluation.accounting(evaluation.arm_summary(days_by_panel["2021"]), panels["2021"]).assign(
+            period="sealed, 2021 only"
+        )
+    )
+    accounts = pd.concat(accounts, ignore_index=True)
+    accounts.to_csv(out / "accounting.csv", index=False)
+
+    table = results_table(hyp) + "\n" + accounting_table(accounts)
     (out / "results.md").write_text(table)
     report = {
         "hypotheses": hyp,
@@ -914,6 +942,22 @@ def results_table(hyp: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
+def accounting_table(accounts: pd.DataFrame) -> str:
+    """Where the perfect-knowledge offer goes, as a table per period and offer form."""
+    lines = [
+        "| Period | Offer form | Step | Who | Mean size (kWh) | Share of perfect knowledge "
+        "| Delivered | Level |",
+        "|---|---|---|---|---|---|---|---|",
+    ]
+    for _, r in accounts.iterrows():
+        lines.append(
+            f"| {r['period']} | {r['form']} | {r['step']} | {r['who']} | "
+            f"{_fmt(r['size_mean_kwh'])} | {_fmt(r['share_of_perfect'], 3)} | "
+            f"{_fmt(r['delivered'])} | {_fmt(r['level'], 3)} |"
+        )
+    return "\n".join(lines) + "\n"
+
+
 def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
@@ -1005,6 +1049,12 @@ def main(argv: list[str] | None = None) -> int:
     opts.add_argument("--out", type=Path, default=Path("results/options"))
     opts.add_argument("--workers", type=int, default=10)
 
+    acc = commands.add_parser(
+        "accounting",
+        help="where the perfect-knowledge offer goes, May to August 2019 (after levels, options)",
+    )
+    acc.add_argument("--levels", type=Path, default=Path("results/levels"))
+    acc.add_argument("--options", type=Path, default=Path("results/options"))
     lev = commands.add_parser(
         "levels",
         help="the level sweep: offer size against delivery at every level, May to August 2019",
@@ -1103,6 +1153,9 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "options":
         manifest = run_options(args.data, args.out, workers=args.workers)
         print(f"wrote the options to {args.out} in {manifest['seconds']:.0f} s")
+    elif args.command == "accounting":
+        frame = run_accounting(args.levels, args.options, args.levels)
+        print(frame.to_string(index=False))
     elif args.command == "levels":
         manifest = run_levels(args.data, args.out, workers=args.workers)
         print(f"wrote the level sweep to {args.out} in {manifest['seconds']:.0f} s")

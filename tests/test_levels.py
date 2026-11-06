@@ -166,3 +166,44 @@ def test_with_the_empty_cars_known_they_are_dropped_and_the_models_train_without
     assert rows["dropped_cars"].sum() > 0
     with pytest.raises(ValueError):
         LevelSweep(population(), {}, drop_empty=True)
+
+
+def test_the_accounting_reads_each_step_at_its_own_delivery_rate():
+    def curve(model, sizes, fixed, hindsight):
+        return pd.DataFrame(
+            {
+                "model": model,
+                "model_name": model,
+                "form": "average",
+                "level": [0.0, 0.1, 0.2],
+                "size_mean_kwh": sizes,
+                "fixed_delivered": fixed,
+                "hindsight_delivered": hindsight,
+            }
+        )
+
+    table = pd.concat(
+        [
+            curve("4", [0.0, 1.0, 2.0], [1.0, 0.92, 0.80], [1.0, 1.0, 0.95]),
+            curve("4k", [0.0, 5.0, 9.0], [1.0, 0.95, 0.91], [1.0, 1.0, 1.0]),
+        ]
+    )
+    oracle = pd.DataFrame(
+        {
+            "form": ["average"],
+            "size_mean_kwh": [40.0],
+            "fixed_delivered": [1.0],
+            "exact_true_kwh": [90.0],
+        }
+    )
+    online = pd.DataFrame(
+        {"arm": ["4d"], "form": ["average"], "size_mean_kwh": [0.5], "fixed_delivered": [0.94]}
+    )
+    out = levels.accounting(table, oracle, online).set_index(["step", "who"])
+    assert out.loc[("exact band of the true sets", "1"), "size_mean_kwh"] == 90.0
+    assert out.loc[("perfect knowledge", "1"), "share_of_perfect"] == 1.0
+    assert out.loc[("forecasts at 90% delivery", "4"), "size_mean_kwh"] == 1.0
+    assert out.loc[("forecasts at 90% delivery", "4"), "delivered"] == 0.92
+    assert out.loc[("empty cars known", "4k"), "size_mean_kwh"] == 9.0
+    assert out.loc[("hindsight split at 90%", "4"), "size_mean_kwh"] == 2.0
+    assert out.loc[("day-level rule as run", "4d"), "share_of_perfect"] == 0.5 / 40.0

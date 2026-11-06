@@ -462,6 +462,16 @@ def monthly(days: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(out)
 
 
+def accounting(summary: pd.DataFrame, sweep_table: pd.DataFrame) -> pd.DataFrame:
+    """`levels.accounting` for a period: the oracle's rows and the day-level arms of both
+    designs from the period's summary (at JPL, track 1 only), the sweep's table beside them."""
+    if "track" in summary.columns:
+        summary = summary[(summary["track"] == "frozen") | summary["arm"].str.startswith("1")]
+    oracle = summary[summary["arm"].isin(["1", "1a"])]
+    online = summary[summary["arm"].isin([*REGISTERED[3:6], *SECONDARY[1:]])]
+    return levels.accounting(sweep_table, oracle, online)
+
+
 def paired(days: pd.DataFrame, a: str, b: str, *, weeks: int = 1) -> dict:
     """H1's contrast: arm a against arm b, relative difference of mean size, paired by day,
     with a week-block interval; both arms' delivery rates beside it."""
