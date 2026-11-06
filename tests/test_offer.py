@@ -239,3 +239,11 @@ def test_a_car_with_no_energy_left_adds_no_capacity_to_the_average_base_set():
     base = BaseSet.average(fleet)
     assert (base.power[16:] == 0).all()
     assert solve(fleet, base).alpha > 0
+
+
+def test_a_base_set_with_a_negligible_ceiling_offers_nothing():
+    from fleetoffer.offer import BaseSet, Fleet, solve
+
+    fleet = Fleet.of([40, 20], [1e-9, 0.0])
+    offer = solve(fleet, BaseSet.average(fleet))
+    assert offer.alpha == 0.0 and offer.size() == 0.0

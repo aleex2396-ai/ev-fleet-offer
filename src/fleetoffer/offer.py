@@ -40,6 +40,7 @@ SIZE_CHECKPOINTS = (16, 24, 32)  # the offer's size is its band width at 14:00, 
 # 10:00-11:00 and 15:00-16:00, an evening peak 16:00-20:00. Only the order of prices matters.
 TARIFF = np.array([2.0] * 4 + [1.0] * 16 + [2.0] * 4 + [4.0] * 16)
 DELIVERY_TOL_KWH = 1e-4  # a profile counts as delivered if at most this much is missing
+TRIVIAL_BASE_KWH = 1e-7  # a base set with a smaller energy ceiling is treated as empty
 # Programme (24) is solved by HiGHS's interior-point method with crossover to a vertex; on
 # made-up fleets of 20 to 40 cars it is five times faster than its simplex method and gives
 # the same alpha. Which optimal gamma_i and Gamma_i it returns fixes the allocation of (31).
@@ -117,8 +118,11 @@ class BaseSet:
         return cls(fleet.upper().mean(axis=0), float(fleet.energy.mean()), fleet.step_h)
 
     def is_trivial(self) -> bool:
-        """True if U0 holds only the zero profile, so no scaling of it offers anything."""
-        return self.energy <= 0 or not (self.power > 0).any()
+        """True if U0 holds only the zero profile, so no scaling of it offers anything. An
+        energy ceiling of at most `TRIVIAL_BASE_KWH` counts as zero: such a base set offers
+        less than the delivery tolerance at any scale the programme returns, and the solver
+        reports the programme on it as unbounded."""
+        return self.energy <= TRIVIAL_BASE_KWH or not (self.power > 0).any()
 
     def width(self, t: int) -> float:
         """Max minus min over U0 of the cumulative energy after step t."""
