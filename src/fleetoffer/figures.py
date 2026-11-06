@@ -202,14 +202,43 @@ def plot_frontier(
     measure: str = "fixed_delivered",
     oracle: dict[str, float] | None = None,
     target: float = 0.90,
+    monthly: pd.DataFrame | None = None,
+    monthly_arms: dict[str, tuple[str, int, str]] | None = None,
 ) -> Path:
     """Figure 3: mean offer size against the share of scored weekdays delivered, one curve per
     model across the swept levels, one panel per period. `models` maps a model to (label,
-    colour index, line style); `oracle` gives each panel's perfect-knowledge size."""
-    fig, axes = plt.subplots(1, len(panels), figsize=(4.2 * len(panels), 4.2), dpi=150)
-    axes = [axes] if len(panels) == 1 else list(axes)
+    colour index, line style); `oracle` gives each panel's perfect-knowledge size. With
+    `monthly`, a last panel gives each arm of `monthly_arms` its share of days delivered by
+    month, with the interval from resampling whole weeks."""
+    extra = monthly is not None and bool(monthly_arms)
+    count = len(panels) + int(extra)
+    fig, axes = plt.subplots(1, count, figsize=(4.2 * count, 4.2), dpi=150)
+    axes = [axes] if count == 1 else list(axes)
     fig.patch.set_facecolor(SURFACE)
-    for ax, (name, table) in zip(axes, panels.items(), strict=True):
+    if extra:
+        ax = axes[-1]
+        for arm, (label, colour, style) in monthly_arms.items():
+            m = monthly[monthly["arm"] == arm].sort_values("month")
+            if m.empty:
+                continue
+            x = pd.PeriodIndex(m["month"], freq="M").to_timestamp() + pd.Timedelta(days=14)
+            ax.plot(x, 100 * m["fixed_delivered"], color=SERIES[colour], ls=style, lw=1.3)
+            ax.fill_between(
+                x,
+                100 * m["fixed_delivered_low"],
+                100 * m["fixed_delivered_high"],
+                color=SERIES[colour],
+                alpha=0.15,
+                lw=0,
+                label=label,
+            )
+        ax.axhline(100 * target, color=INK_2, lw=0.8)
+        ax.set_ylim(0, 102)
+        ax.set_title("days delivered by month, 95% week-block interval", fontsize=9, loc="left")
+        ax.xaxis.set_major_formatter(mdates.DateFormatter("%b %y"))
+        ax.legend(loc="lower left", frameon=False, fontsize=7, labelcolor=INK_2)
+        _quiet_axes(ax)
+    for ax, (name, table) in zip(axes, panels.items(), strict=False):
         rows = table[table["form"] == form]
         for model, (label, colour, style) in models.items():
             curve = rows[rows["model"] == model].sort_values("level")

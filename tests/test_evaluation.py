@@ -201,3 +201,28 @@ def test_the_oracle_run_in_pieces_gives_the_days_of_one_whole_run(claimed, monke
         evaluation.run_jpl("d", "rehearsal-jpl", "5", "segment", "frozen", piece=0)
     jobs = evaluation.jobs("jpl", "d", True)
     assert sum(job[3] == "1a" for job in jobs) == len(evaluation.ORACLE_PIECES["jpl"]) - 1
+
+
+def test_the_0900_sensitivity_decides_at_nine_and_learns_from_nine_oclock_days(claimed):
+    sessions, entries = claimed
+    rule = calibrated()
+    result = fleet_replay(
+        sessions, rule, entries=entries, method="segment", **evaluation.SENSITIVITIES["at0900"]
+    )
+    local = result.days["decision_time"].dt.tz_convert(LOCAL_TZ)
+    assert (local.dt.hour == 9).all() and (local.dt.minute == 0).all()
+    offered = result.days["size_kwh"].notna()
+    assert offered.sum() > 20
+    assert len(rule.scores) > 20 and rule.per_car.fitted["population"]
+
+
+def test_the_monthly_delivery_rate_comes_with_a_week_block_interval():
+    days = weekdays("2021-03-01", 40, [10] * 40).assign(
+        arm="4", size_kwh=1.0, fixed_delivered=[True, False, True, True] * 10
+    )
+    table = evaluation.monthly(days).set_index("month")
+    for _, row in table.iterrows():
+        assert row["fixed_delivered_low"] <= row["fixed_delivered"] <= row["fixed_delivered_high"]
+    assert table["days"].sum() == 40
+    full = evaluation.monthly(days.assign(fixed_delivered=True))
+    assert (full["fixed_delivered_low"] == 1).all() and (full["fixed_delivered_high"] == 1).all()

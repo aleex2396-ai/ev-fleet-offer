@@ -749,10 +749,30 @@ def run_report(results: Path, out: Path, *, rehearsal: bool = False) -> dict:
         "2021": levels.table(sweep_sealed[year == 2021], None),
         "JPL, track 1": _read(folders["jpl"], "sweep_table.csv"),
     }
-    for form in ("average", "segment"):
+    sealed_days = _read(sealed, "days.csv.gz")
+    in_2021 = sealed_days["decision_time"].dt.tz_convert(LOCAL_TZ).dt.year == 2021
+    days_by_panel = {
+        "September 2019 to February 2020": evaluation.scored_days(
+            _read(folders["evaluation"], "days.csv.gz"), evaluation.OFFERS_FROM["evaluation"]
+        ),
+        "2021": evaluation.scored_days(sealed_days[in_2021]),
+        "JPL, track 1": evaluation.scored_days(_read(folders["jpl"], "days.csv.gz")),
+    }
+    for form, oracle_arm, arms in (
+        ("average", "1a", ("4d", "5d", "6d")),
+        ("segment", "1", ("4", "5", "6")),
+    ):
         rows = {k: v for k, v in panels.items() if (v["form"] == form).any()}
+        oracle = {
+            k: float(d.loc[d["arm"] == oracle_arm, "size_kwh"].mean())
+            for k, d in days_by_panel.items()
+            if k in rows
+        }
+        labels = {a: FIGURE_THREE_MODELS[a.removesuffix("d")] for a in arms}
         name = f"figure3-{form}.png"
-        written.append(figure_frontier(rows, out / name, FIGURE_THREE_MODELS, form))
+        written.append(
+            figure_frontier(rows, out / name, FIGURE_THREE_MODELS, form, oracle, caltech, labels)
+        )
     pd.concat([v.assign(panel=k) for k, v in panels.items()]).to_csv(
         out / "figure3.csv", index=False
     )
@@ -804,7 +824,7 @@ def figure_offers(monthly, path, arms, site, note) -> Path:
     )
 
 
-def figure_frontier(panels, path, models, form) -> Path:
+def figure_frontier(panels, path, models, form, oracle, monthly, monthly_arms) -> Path:
     from fleetoffer.figures import plot_frontier
 
     label = {"average": "day-average base set", "segment": "one-dimensional fallback"}[form]
@@ -813,6 +833,9 @@ def figure_frontier(panels, path, models, form) -> Path:
         path,
         models=models,
         form=form,
+        oracle=oracle,
+        monthly=monthly,
+        monthly_arms=monthly_arms,
         title=f"Offer size against days delivered at every shared level ({label})",
         note="Each point is one shared quantile level, averaged over the scored weekdays; "
         "delivery under the allocation fixed at 10:00. Dashed: the diagnostic in which the cars "

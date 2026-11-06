@@ -35,7 +35,7 @@ from fleetoffer.features import LOCAL_TZ
 from fleetoffer.interface import DayOutcome, DayView, FleetRule
 from fleetoffer.offer import CAP_KW, STEPS, BaseSet
 from fleetoffer.quantiles import PerCarRule
-from fleetoffer.resample import paired_interval
+from fleetoffer.resample import paired_interval, rate_interval
 
 EVALUATION_START = percar.SELECTION_END  # 1 September 2019, Pacific
 EVALUATION_END = data.TEST_PERIODS["caltech"]  # 1 March 2020, Pacific
@@ -441,19 +441,25 @@ def arm_summary(days: pd.DataFrame) -> pd.DataFrame:
 
 
 def monthly(days: pd.DataFrame) -> pd.DataFrame:
-    """Per arm and month: mean size and share of days delivered (Figure 2)."""
+    """Per arm and month: mean size and share of days delivered, with that share's interval
+    from resampling the month's whole weeks (Figures 2 and 3)."""
     month = days["decision_time"].dt.tz_convert(LOCAL_TZ).dt.tz_localize(None).dt.to_period("M")
     keys = [k for k in ("track", "arm", "form") if k in days.columns]
     rows = days.assign(month=month.astype(str), fixed=days["fixed_delivered"].astype(float))
-    return (
-        rows.groupby([*keys, "month"])
-        .agg(
-            days=("decision_time", "size"),
-            size_mean_kwh=("size_kwh", "mean"),
-            fixed_delivered=("fixed", "mean"),
+    out = []
+    for key, group in rows.groupby([*keys, "month"], sort=True):
+        rate = rate_interval(group, "fixed")
+        out.append(
+            dict(zip([*keys, "month"], key, strict=True))
+            | {
+                "days": len(group),
+                "size_mean_kwh": float(group["size_kwh"].mean()),
+                "fixed_delivered": float(group["fixed"].mean()),
+                "fixed_delivered_low": rate["low"],
+                "fixed_delivered_high": rate["high"],
+            }
         )
-        .reset_index()
-    )
+    return pd.DataFrame(out)
 
 
 def paired(days: pd.DataFrame, a: str, b: str, *, weeks: int = 1) -> dict:
