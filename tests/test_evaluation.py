@@ -177,3 +177,27 @@ def test_the_sensitivities_change_one_setting_on_the_caltech_runs_only():
     base = BaseSet(np.linspace(5.0, 0.2, STEPS), 5.774)
     assert evaluation.make_rule("4d", "average", base, cap=11.0).cap == 11.0
     assert evaluation.make_rule("5d", "average", base).cap == 6.7
+
+
+def test_the_oracle_run_in_pieces_gives_the_days_of_one_whole_run(claimed, monkeypatch):
+    sessions, entries = claimed
+    monkeypatch.setattr(evaluation, "load", lambda *args, **kwargs: (sessions, entries))
+    edges = ["2000-01-01", "2001-02-15", "2001-04-01", "2100-01-01"]
+    monkeypatch.setitem(evaluation.ORACLE_PIECES, "rehearsal-jpl", edges)
+    whole = evaluation.run_jpl("d", "rehearsal-jpl", "1", "segment", "frozen")
+    parts = [
+        evaluation.run_jpl("d", "rehearsal-jpl", "1", "segment", "frozen", piece=k)
+        for k in range(len(edges) - 1)
+    ]
+    for key in ("days", "cars"):
+        joined = pd.concat([p[key] for p in parts], ignore_index=True)
+        expected = whole[key]
+        assert len(joined) == len(expected) > 50
+        drop = [c for c in ("solve_seconds",) if c in expected.columns]
+        pd.testing.assert_frame_equal(
+            joined.drop(columns=drop), expected.drop(columns=drop), check_dtype=False
+        )
+    with pytest.raises(ValueError):
+        evaluation.run_jpl("d", "rehearsal-jpl", "5", "segment", "frozen", piece=0)
+    jobs = evaluation.jobs("jpl", "d", True)
+    assert sum(job[3] == "1a" for job in jobs) == len(evaluation.ORACLE_PIECES["jpl"]) - 1

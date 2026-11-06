@@ -117,6 +117,16 @@ SENSITIVITY_ARMS = (
     ("5d", SECONDARY_FORM),
 )
 NEVER = pd.Timestamp("2100-01-01", tz="UTC")  # offers_from for a run that only learns
+# The oracle learns nothing, so its days can be run apart. At JPL its programme (24) on the
+# day-average base set, with about twice Caltech's cars, is run in half-year pieces at once.
+ORACLE_PIECES = {
+    "jpl": ["2000-01-01"]
+    + [f"{y}-{m:02d}-01" for y in (2018, 2019, 2020, 2021) for m in (1, 7)][1:]
+    + ["2100-01-01"],
+    "rehearsal-jpl": ["2000-01-01"]
+    + [f"2019-{m}" for m in ("06-10", "06-20", "07-01", "07-10", "07-20", "08-01", "08-15")]
+    + ["2100-01-01"],
+}
 BASE_FILE = Path(__file__).with_name("h0.json")  # committed at the tag, loaded, never recomputed
 
 
@@ -290,20 +300,43 @@ def for_jpl(rule: FleetRule, track: str, trained_until=EVALUATION_END) -> FleetR
 
 
 def run_jpl(
-    data_root: str, period: str, name: str, form: str, track: str, unseal: bool = False
+    data_root: str,
+    period: str,
+    name: str,
+    form: str,
+    track: str,
+    unseal: bool = False,
+    piece: int | None = None,
 ) -> dict:
+    """One arm at the other site in one track; the oracle may be run in `ORACLE_PIECES`."""
     window = WINDOWS[period]
     base = base_set()
-    trained = trained_on_caltech(data_root, make_rule(name, form, base), window.train_until)
+    made = make_rule(name, form, base)
+    if piece is not None and not isinstance(made, Oracle):
+        raise ValueError("only the oracle, which learns nothing, is run in pieces")
+    trained = trained_on_caltech(data_root, made, window.train_until)
     rule = for_jpl(trained, track, window.train_until)
     sessions, entries = load(data_root, period, unseal=unseal)
+    until, first = window.until, None
+    if piece is not None:
+        edges = [_local(day) for day in ORACLE_PIECES[period]]
+        first, last = edges[piece], edges[piece + 1]
+        until = last if until is None else min(until, last)
     result = fleet_replay(
-        sessions, rule, entries=entries, until=window.until, **options.engine_options(form, base)
+        sessions,
+        rule,
+        entries=entries,
+        until=until,
+        offers_from=first,
+        **options.engine_options(form, base),
     )
     out = _rows(rule, result, name, form)
     for key in ("days", "cars", "log"):
         if key in out:
-            out[key] = out[key].assign(track=track)
+            frame = out[key].assign(track=track)
+            if first is not None and "decision_time" in frame.columns:
+                frame = frame[frame["decision_time"] >= first].reset_index(drop=True)
+            out[key] = frame
     return out
 
 
@@ -339,6 +372,12 @@ def jobs(period: str, data_root: str, unseal: bool) -> list[tuple]:
             for name, form in arms(period):
                 if name.startswith("1") and track == "updating":
                     continue  # the oracle learns nothing; one run serves both tracks
+                if name == "1a":
+                    pieces = range(len(ORACLE_PIECES[period]) - 1)
+                    out += [
+                        (data_root, "jpl", period, name, form, track, unseal, k) for k in pieces
+                    ]
+                    continue
                 out.append((data_root, "jpl", period, name, form, track, unseal))
     else:
         out += [(data_root, "arm", period, name, form, unseal) for name, form in arms(period)]
