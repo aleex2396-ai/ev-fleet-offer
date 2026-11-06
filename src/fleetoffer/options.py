@@ -20,7 +20,7 @@ from fleetoffer import devchecks, percar
 from fleetoffer.daylevel import DeliveryCalibrated, MakeOffer
 from fleetoffer.devchecks import SELECTION_START, make_arm, selection_days
 from fleetoffer.engine import fleet_replay, training_base_set
-from fleetoffer.offer import BaseSet, solve, solve_segment
+from fleetoffer.offer import CAP_KW, BaseSet, solve, solve_segment
 
 FORMS = ("fixed", "average", "segment")  # base set fixed from training, day-average, fallback
 MODELS = {"4": "learned", "5": "population", "6": "stratified"}
@@ -48,15 +48,19 @@ def engine_options(form: str, base: BaseSet) -> dict:
     return {"method": "programme", "base": base if form == "fixed" else None}
 
 
-def make_run(name: str, form: str, base: BaseSet):
+def make_run(name: str, form: str, base: BaseSet, cap: float = CAP_KW):
     """Arm `name` of `devchecks.make_arm`, or, with a trailing "d", arm 4, 5 or 6 with the
-    primary rule calibrated on delivery of the offer form `form`."""
+    primary rule calibrated on delivery of the offer form `form` (its offers made again at the
+    power cap `cap`, which must be the engine's)."""
     if not name.endswith("d"):
         rule = make_arm(name)
     else:
         model = devchecks.make_arm(name[0]).per_car
         rule = DeliveryCalibrated(
-            model, make_offer(form, base), name=f"{name} {MODELS[name[0]]}, aci on delivery"
+            model,
+            make_offer(form, base),
+            cap=cap,
+            name=f"{name} {MODELS[name[0]]}, aci on delivery",
         )
     rule.name = f"{rule.name} | {form}"
     return rule

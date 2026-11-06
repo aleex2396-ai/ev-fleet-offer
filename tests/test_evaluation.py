@@ -1,0 +1,179 @@
+import numpy as np
+import pandas as pd
+import pytest
+
+from fleetoffer import evaluation
+from fleetoffer.baselines import Population
+from fleetoffer.daylevel import Calibrated
+from fleetoffer.engine import fleet_replay
+from fleetoffer.features import LOCAL_TZ
+from fleetoffer.offer import STEPS, BaseSet
+from fleetoffer.quantiles import PerCarRule
+from fleetoffer.synthetic import Regime, make_sessions, with_app_entries
+
+
+def no_flags(dates):
+    n = len(dates)
+    return pd.DataFrame({"in_term": np.zeros(n), "summer": np.zeros(n), "holiday": np.zeros(n)})
+
+
+def calibrated():
+    return Calibrated(PerCarRule([Population()], min_rows=50, calendar=no_flags), gamma=0.05)
+
+
+@pytest.fixture(scope="module")
+def claimed():
+    sessions = make_sessions(
+        [Regime("2001-01-01", sessions_per_weekday=12, median_stay_h=6.0, drivers=40)],
+        "2001-05-20",
+        seed=3,
+    )
+    return with_app_entries(sessions, seed=3)
+
+
+def test_a_frozen_rule_stops_refitting_scoring_and_moving_its_level(claimed):
+    sessions, entries = claimed
+    when = pd.Timestamp("2001-04-01", tz=LOCAL_TZ)
+    rule = calibrated()
+    frozen = evaluation.Frozen(rule, when)
+    fleet_replay(sessions, frozen, entries=entries, method="bounds")
+    assert frozen.is_frozen
+    origins = pd.to_datetime([row["origin"] for row in rule.per_car.fit_log])
+    assert (origins < when).all() and len(origins) >= 3
+    observed = pd.to_datetime([row["decision_time"] for row in rule.log])
+    assert len(observed) > 20
+    later = [when + pd.Timedelta(days=d) for d in (1, 20, 45)]
+    assert len({rule.level(t) for t in later}) == 1
+    assert rule.frozen_at == when
+
+
+def test_the_updating_jpl_track_forgets_caltech_days_and_keeps_its_fit(claimed):
+    sessions, entries = claimed
+    rule = calibrated()
+    fleet_replay(sessions, rule, entries=entries, method="bounds")
+    assert rule.scores and rule.per_car.fitted["population"]
+    moved = evaluation.for_jpl(rule, "updating")
+    assert moved.scores == [] and moved.per_car.cardays().empty
+    other = make_sessions(
+        [Regime("2003-01-01", sessions_per_weekday=12, median_stay_h=4.0, drivers=30)],
+        "2003-03-10",
+        seed=9,
+    )
+    other, other_entries = with_app_entries(other, seed=9)
+    fleet_replay(other, moved, entries=other_entries, method="bounds")
+    first = [row for row in moved.per_car.fit_log if row["origin"].year == 2003][0]
+    assert first["kept_earlier_fit"] and not first["fitted"]
+    assert len(moved.scores) > 10
+
+
+def test_the_frozen_jpl_track_hides_history_and_learns_nothing(claimed):
+    sessions, entries = claimed
+    rule = calibrated()
+    fleet_replay(sessions, rule, entries=entries, method="bounds")
+    scores = list(rule.scores)
+    frozen = evaluation.for_jpl(rule, "frozen")
+    assert rule.per_car.frozen and rule.per_car.hide_history
+    other = make_sessions(
+        [Regime("2003-01-01", sessions_per_weekday=12, median_stay_h=4.0, drivers=30)],
+        "2003-02-20",
+        seed=9,
+    )
+    other, other_entries = with_app_entries(other, seed=9)
+    fleet_replay(other, frozen, entries=other_entries, method="bounds")
+    assert rule.scores == scores
+
+
+def weekdays(start, n, cars):
+    times = pd.bdate_range(start, periods=n, tz=LOCAL_TZ) + pd.Timedelta(hours=10)
+    return pd.DataFrame({"decision_time": times.tz_convert("UTC"), "cars": cars})
+
+
+def test_the_reopening_is_the_first_2021_weekday_whose_ten_day_average_reaches_five():
+    cars = [0] * 15 + [10] * 20
+    days = weekdays("2021-01-01", len(cars), cars)
+    # the trailing average first reaches 5 on the fifth weekday with 10 cars
+    expected = days["decision_time"].iloc[19].tz_convert(LOCAL_TZ).date()
+    assert evaluation.reopening(days) == str(expected)
+    assert evaluation.reopening(weekdays("2021-01-01", 30, [3] * 30)) == ""
+
+
+def h3_days(adaptive, frozen):
+    n = len(adaptive)
+    base = weekdays("2021-03-01", n, [20] * n).assign(
+        size_kwh=1.0, cars_with_energy=10, exact_true_kwh=5.0
+    )
+    rows = [
+        base.assign(arm="4", fixed_delivered=adaptive),
+        base.assign(arm="4f", fixed_delivered=frozen),
+    ]
+    return pd.concat(rows, ignore_index=True)
+
+
+def test_h3_reads_the_frozen_and_adaptive_arms():
+    adaptive = [False] * 10 + [True] * 40
+    frozen = [True] * 10 + [False] * 40
+    out = evaluation.h3(h3_days(adaptive, frozen), "2021-03-01", "4", "4f")
+    assert out["frozen_first20_delivered"] == pytest.approx(0.5)
+    assert out["h3a"] == "pass"
+    assert out["adaptive_reached_at_scored_weekday"] == 28  # 18 of the last 20 delivered
+    assert out["h3b"] == "pass"
+    late = [False] * 30 + [True] * 20
+    assert evaluation.h3(h3_days(late, frozen), "2021-03-01", "4", "4f")["h3b"] == "fail"
+
+
+def test_h1_with_both_arms_at_zero_is_not_testable():
+    days = h3_days([True] * 30, [True] * 30).assign(size_kwh=0.0)
+    days["arm"] = days["arm"].map({"4": "4", "4f": "5"})
+    assert evaluation.paired(days, "4", "5")["reading"] == "not testable: both arms offer zero"
+
+
+def test_the_base_set_is_written_and_read_back_exactly(tmp_path):
+    base = BaseSet(np.linspace(5.0, 0.2, STEPS), 5.774)
+    evaluation.write_base_set(base, tmp_path / "h0.json")
+    back = evaluation.base_set(tmp_path / "h0.json")
+    assert np.array_equal(back.power, base.power) and back.energy == base.energy
+
+
+def test_every_period_runs_the_registered_and_secondary_arms_and_the_sweep():
+    for period in evaluation.PERIODS:
+        jobs = evaluation.jobs(period, "data", False)
+        kinds = {job[1] for job in jobs}
+        assert "sweep" in kinds
+        names = {job[3] for job in jobs if job[1] != "sweep"}
+        assert set(evaluation.REGISTERED) | set(evaluation.SECONDARY) <= names
+    for period in ("sealed", "rehearsal-sealed"):
+        sealed = {job[3] for job in evaluation.jobs(period, "data", False) if job[1] == "arm"}
+        assert set(evaluation.FROZEN_ARMS) <= sealed
+    jpl = evaluation.jobs("jpl", "data", False)
+    assert ("data", "jpl", "jpl", "1", "segment", "updating", False) not in jpl
+    for period in evaluation.PERIODS:
+        rehearsal = f"rehearsal-{evaluation.stage(period)}"
+        assert len(evaluation.jobs(period, "d", False)) == len(
+            evaluation.jobs(rehearsal, "d", False)
+        )
+
+
+def test_the_committed_base_set_is_the_one_printed_in_the_registration_page():
+    import re
+    from pathlib import Path
+
+    base = evaluation.base_set()
+    page = (Path(__file__).parents[1] / "docs" / "registration.md").read_text()
+    table = page[page.index("**h₀") :]
+    printed = [float(x) for x in re.findall(r"\| (\d+\.\d{3}) ", table)]
+    assert len(printed) == STEPS
+    assert np.allclose(np.round(base.power, 3), printed)
+    assert f"{base.energy:.3f} kWh" in page
+
+
+def test_the_sensitivities_change_one_setting_on_the_caltech_runs_only():
+    for period in ("evaluation", "sealed"):
+        jobs = evaluation.jobs(period, "d", False)
+        runs = [job for job in jobs if job[1] == "arm" and len(job) == 7]
+        assert {job[6] for job in runs} == set(evaluation.SENSITIVITIES)
+        assert len(runs) == len(evaluation.SENSITIVITIES) * len(evaluation.SENSITIVITY_ARMS)
+    settings = set(evaluation.SENSITIVITIES)
+    assert not any(settings & set(job) for job in evaluation.jobs("jpl", "d", False))
+    base = BaseSet(np.linspace(5.0, 0.2, STEPS), 5.774)
+    assert evaluation.make_rule("4d", "average", base, cap=11.0).cap == 11.0
+    assert evaluation.make_rule("5d", "average", base).cap == 6.7

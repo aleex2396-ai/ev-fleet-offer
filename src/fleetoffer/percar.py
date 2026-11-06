@@ -82,29 +82,39 @@ FIXED = {
 }
 
 
-def load(data_root, until: pd.Timestamp = SELECTION_END) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Caltech's development sessions plugged in before `until`, with driver links, and the
+def load(
+    data_root,
+    until: pd.Timestamp | None = SELECTION_END,
+    *,
+    site: str = "caltech",
+    unseal: bool = False,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """A site's sessions plugged in before `until` (all, if None), with driver links, and the
     app entries recorded before `until`. Only the monthly files before the UTC month in which
     `until` falls are opened, so no file of a later period is read; at the default this
     leaves out the one session plugged in on the evening of 31 August 2019, Pacific time,
-    which is stored with September's sessions."""
-    if until > SELECTION_END and not data.plan_is_tagged():
+    which is stored with September's sessions. Caltech from 1 March 2020 and JPL need
+    `unseal`, and every period after August 2019 needs the analysis plan's tag."""
+    if (until is None or until > SELECTION_END) and not data.plan_is_tagged():
         raise data.SealedPeriodError(
             "months from September 2019 are the frozen development evaluation; they are "
             f"scored only once the '{data.PLAN_TAG}' tag exists"
         )
-    utc = until.tz_convert("UTC")
-    first_unread = pd.Timestamp(year=utc.year, month=utc.month, day=1, tz="UTC")
-    items = data.load_items(data_root, "caltech", before=first_unread)
+    first_unread = None
+    if until is not None:
+        utc = until.tz_convert("UTC")
+        first_unread = pd.Timestamp(year=utc.year, month=utc.month, day=1, tz="UTC")
+    items = data.load_items(data_root, site, before=first_unread, unseal=unseal)
     sessions, _ = data.clean_sessions(data.parse_sessions(items))
     inputs = data.parse_user_inputs(items)
     sessions = data.driver_links(sessions, inputs)
-    sessions = sessions[sessions["connect_time"] < until].reset_index(drop=True)
+    if until is not None:
+        sessions = sessions[sessions["connect_time"] < until].reset_index(drop=True)
     entries = data.app_entries(inputs)
-    entries = entries[
-        entries["session_id"].isin(set(sessions["session_id"])) & (entries["modified_at"] < until)
-    ]
-    return sessions, entries.reset_index(drop=True)
+    keep = entries["session_id"].isin(set(sessions["session_id"]))
+    if until is not None:
+        keep &= entries["modified_at"] < until
+    return sessions, entries[keep].reset_index(drop=True)
 
 
 def record(sessions, entries, until=SELECTION_END) -> PerCarRule:

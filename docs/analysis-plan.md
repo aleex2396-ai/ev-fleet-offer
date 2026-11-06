@@ -161,3 +161,14 @@ Changes to this plan before the `analysis-plan` tag, each with its reason.
 - Section 3, the ninth checked profile: the least-cost profile of a set that contains the zero
   profile is p itself. It is read as the least-cost profile among those delivering the base
   set's largest total energy (`docs/theory.md`, with the tariff and the tie-breaking).
+- Sections 3 and 5: check D9 called for the one-dimensional fallback offer (the oracle's α
+  below 0.2 on 37.6% of the scored weekdays of May to August 2019, against 25%), so it is the
+  offer of every registered arm after the tag (`docs/registration.md`).
+- Sections 5, 8 and 9, after the first fleet run on May to August 2019: under the registered
+  day-level rule every learned and population offer on those months was zero. Three analyses
+  were added and fixed for every later period before the tag, labelled as chosen after that
+  look: the same adaptive rule applied to a day score on delivery, with the day-average base
+  set (arms 4d, 5d and 6d, H1 read for both designs); the offer at every level of the delivery
+  grid, which also gives Figure 3's curves; and the same sweep with the cars that take nothing
+  after 10:00 known, as a perfect-knowledge yardstick. The registered design stays the primary
+  result and no threshold was changed (`docs/registration.md`, `docs/prior-looks.md`).

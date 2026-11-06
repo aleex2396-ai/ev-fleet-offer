@@ -140,3 +140,137 @@ def _quiet_axes(ax) -> None:
     for side in ("left", "bottom"):
         ax.spines[side].set_color(RULE_LINE)
     ax.tick_params(colors=INK_2, labelsize=8, length=3)
+
+
+def _finish(fig, path: Path, title: str, note: str | None, right: float = 0.97) -> Path:
+    fig.suptitle(title, x=0.01, ha="left", fontsize=11, color=INK)
+    bottom_margin = 0.0
+    if note:
+        wrapped = textwrap.fill(note, width=120)
+        fig.text(0.01, 0.01, wrapped, fontsize=7.5, color=INK_2, ha="left", va="bottom")
+        bottom_margin = 0.025 * (wrapped.count("\n") + 1) + 0.01
+    fig.tight_layout(rect=(0, bottom_margin, right, 0.95))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(path, facecolor=SURFACE)
+    plt.close(fig)
+    return path
+
+
+def plot_offers_monthly(
+    monthly: pd.DataFrame,
+    path: Path,
+    *,
+    arms: dict[str, tuple[str, int, str]],
+    title: str,
+    note: str | None = None,
+    target: float = 0.90,
+) -> Path:
+    """Figure 2: per month, the share of scored weekdays delivered under the fixed allocation
+    and the mean offer size, one line per arm. `arms` maps an arm to (label, colour index,
+    line style)."""
+    fig, (top, bottom) = plt.subplots(
+        2, 1, figsize=(8.0, 5.8), dpi=150, sharex=True, gridspec_kw={"height_ratios": [2, 3]}
+    )
+    fig.patch.set_facecolor(SURFACE)
+    for arm, (label, colour, style) in arms.items():
+        m = monthly[monthly["arm"] == arm].sort_values("month")
+        if m.empty:
+            continue
+        x = pd.PeriodIndex(m["month"], freq="M").to_timestamp() + pd.Timedelta(days=14)
+        top.plot(x, 100 * m["fixed_delivered"], color=SERIES[colour], ls=style, lw=1.5, label=label)
+        bottom.plot(x, m["size_mean_kwh"], color=SERIES[colour], ls=style, lw=1.5, label=label)
+    top.axhline(100 * target, color=INK_2, lw=0.9, zorder=1)
+    top.set_ylabel("days delivered (%)", color=INK_2, fontsize=9)
+    top.set_ylim(0, 102)
+    bottom.set_ylabel("offer size (kWh, mean)", color=INK_2, fontsize=9)
+    bottom.set_ylim(bottom=0)
+    for ax in (top, bottom):
+        _quiet_axes(ax)
+    bottom.xaxis.set_major_formatter(mdates.DateFormatter("%b %Y"))
+    bottom.legend(loc="upper left", frameon=False, fontsize=7.5, labelcolor=INK_2)
+    return _finish(fig, path, title, note)
+
+
+def plot_frontier(
+    panels: dict[str, pd.DataFrame],
+    path: Path,
+    *,
+    models: dict[str, tuple[str, int, str]],
+    form: str,
+    title: str,
+    note: str | None = None,
+    measure: str = "fixed_delivered",
+    oracle: dict[str, float] | None = None,
+    target: float = 0.90,
+) -> Path:
+    """Figure 3: mean offer size against the share of scored weekdays delivered, one curve per
+    model across the swept levels, one panel per period. `models` maps a model to (label,
+    colour index, line style); `oracle` gives each panel's perfect-knowledge size."""
+    fig, axes = plt.subplots(1, len(panels), figsize=(4.2 * len(panels), 4.2), dpi=150)
+    axes = [axes] if len(panels) == 1 else list(axes)
+    fig.patch.set_facecolor(SURFACE)
+    for ax, (name, table) in zip(axes, panels.items(), strict=True):
+        rows = table[table["form"] == form]
+        for model, (label, colour, style) in models.items():
+            curve = rows[rows["model"] == model].sort_values("level")
+            if curve.empty:
+                continue
+            ax.plot(
+                100 * curve[measure],
+                curve["size_mean_kwh"],
+                color=SERIES[colour],
+                ls=style,
+                lw=1.4,
+                marker="o",
+                ms=2.5,
+                label=label,
+            )
+        if oracle and name in oracle:
+            ax.axhline(oracle[name], color=INK_2, lw=0.8, ls=":")
+            ax.annotate(
+                f"perfect knowledge {oracle[name]:.1f} kWh",
+                xy=(0.0, oracle[name]),
+                xycoords=("axes fraction", "data"),
+                xytext=(2, 3),
+                textcoords="offset points",
+                color=INK_2,
+                fontsize=7,
+            )
+        ax.axvline(100 * target, color=INK_2, lw=0.8)
+        ax.set_title(name, fontsize=9, color=INK, loc="left")
+        ax.set_xlabel("days delivered (%)", color=INK_2, fontsize=9)
+        ax.set_xlim(right=101)
+        ax.set_ylim(bottom=0)
+        _quiet_axes(ax)
+    axes[0].set_ylabel("offer size (kWh, mean)", color=INK_2, fontsize=9)
+    axes[0].legend(loc="upper left", frameon=False, fontsize=7.5, labelcolor=INK_2)
+    return _finish(fig, path, title, note)
+
+
+def plot_failures(
+    per_day: pd.DataFrame, path: Path, *, title: str, note: str | None = None, seed: int = 0
+) -> Path:
+    """Figure 4: for each day, the share of present cars whose learned set was not inside
+    their true set, against whether the offer was delivered under each check."""
+    import numpy as np
+
+    rng = np.random.default_rng(seed)
+    fig, axes = plt.subplots(1, 2, figsize=(8.0, 3.6), dpi=150, sharey=True)
+    fig.patch.set_facecolor(SURFACE)
+    for ax, (column, label) in zip(
+        axes,
+        (
+            ("fixed_delivered", "allocation fixed at 10:00"),
+            ("hindsight_delivered", "hindsight split"),
+        ),
+        strict=True,
+    ):
+        y = per_day[column].astype(float).to_numpy()
+        jitter = y + rng.uniform(-0.15, 0.15, len(y))
+        ax.scatter(100 * per_day["share_mispredicted"], jitter, s=6, color=SERIES[0], alpha=0.6)
+        ax.set_yticks([0, 1], ["not delivered", "delivered"])
+        ax.set_xlabel("present cars mispredicted (%)", color=INK_2, fontsize=9)
+        ax.set_title(label, fontsize=9, color=INK, loc="left")
+        ax.set_xlim(-2, 102)
+        _quiet_axes(ax)
+    return _finish(fig, path, title, note)

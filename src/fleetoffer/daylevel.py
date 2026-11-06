@@ -241,8 +241,18 @@ class Calibrated(FleetRule):
         self.scores: list[tuple[pd.Timestamp, float]] = []  # scored days only
         self.log: list[dict] = []
         self._pending: dict[pd.Timestamp, _Pending] = {}
+        self.frozen_at: pd.Timestamp | None = None  # `evaluation.Frozen`
+
+    def forget_history(self) -> None:
+        """Drop the stored day scores and the models' car-days, keeping the fitted models and
+        the working miss level (JPL, track 2)."""
+        self.scores = []
+        self._pending = {}
+        self.per_car.forget_history()
 
     def _window(self, now: pd.Timestamp) -> np.ndarray:
+        if self.frozen_at is not None:  # the window as it stood when the rule was frozen
+            now = self.frozen_at
         since = now - pd.Timedelta(days=self.window_days)
         return np.array([s for t, s in self.scores if t >= since], dtype=float)
 

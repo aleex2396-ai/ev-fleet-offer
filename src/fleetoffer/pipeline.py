@@ -28,13 +28,15 @@ from fleetoffer import (
     calibrate,
     data,
     devchecks,
+    evaluation,
     levels,
     offer,
     options,
     percar,
 )
 from fleetoffer.engine import Daily, Oracle, energy_in_window, fleet_replay, replay
-from fleetoffer.figures import plot_monthly
+from fleetoffer.features import LOCAL_TZ
+from fleetoffer.figures import plot_failures, plot_monthly
 from fleetoffer.models import FrozenQuantile, RollingQuantile
 from fleetoffer.synthetic import Regime, demo_regimes, make_sessions
 
@@ -614,6 +616,281 @@ def run_levels(data_root: Path, out: Path, workers: int = 10) -> dict:
     return manifest
 
 
+def run_evaluation(
+    period: str, data_root: Path, out: Path, *, unseal: bool = False, workers: int = 10
+) -> dict:
+    """One of the runs after the tag (`evaluation`): every arm, the H3 arms on the sealed
+    months, both JPL tracks, and the level sweep; tables, hypotheses and a manifest."""
+    if not evaluation.is_rehearsal(period) and not data.plan_is_tagged():
+        raise data.SealedPeriodError(f"the runs after the tag need the '{data.PLAN_TAG}' tag")
+    out = Path(out)
+    out.mkdir(parents=True, exist_ok=True)
+    start = datetime.now(UTC)
+    runs = evaluation.run_period(
+        period, data_root, unseal=unseal, workers=workers, store=out / "runs"
+    )
+    arms = [r for r in runs if "days" in r]
+    days = pd.concat([r["days"] for r in arms], ignore_index=True)
+    days.to_csv(out / "days.csv.gz", index=False)
+    pd.concat([r["cars"] for r in arms], ignore_index=True).to_csv(out / "cars.csv.gz", index=False)
+    logs = [r["log"] for r in arms if "log" in r]
+    if logs:
+        pd.concat(logs, ignore_index=True).to_csv(out / "logs.csv.gz", index=False)
+    sweep = pd.concat([r["sweep"] for r in runs if "sweep" in r], ignore_index=True)
+    sweep.to_csv(out / "sweep.csv.gz", index=False)
+    first = evaluation.OFFERS_FROM[period]
+    levels.table(sweep, first).to_csv(out / "sweep_table.csv", index=False)
+    levels.matched(levels.table(sweep, first)).to_csv(out / "sweep_matched.csv", index=False)
+    scored = evaluation.scored_days(days, first)
+    evaluation.arm_summary(scored).to_csv(out / "summary.csv", index=False)
+    evaluation.monthly(scored).to_csv(out / "monthly.csv", index=False)
+    predictions = {r["name"]: r["predictions"] for r in arms if "predictions" in r}
+    for name, frame in predictions.items():
+        frame.to_csv(out / f"predictions_{name}.csv.gz", index=False)
+    report = evaluation.hypotheses(period, scored, days, predictions)
+    (out / "hypotheses.json").write_text(json.dumps(_json(report), indent=2, default=str))
+    manifest = {
+        "run": f"evaluate {period}",
+        "made_at_utc": start.isoformat(timespec="seconds"),
+        "package_version": __version__,
+        "code": _git_state(),
+        "python": platform.python_version(),
+        "solver": offer.SOLVER,
+        "seconds": (datetime.now(UTC) - start).total_seconds(),
+        "jobs": [list(job[1:]) for job in evaluation.jobs(period, str(data_root), unseal)],
+    }
+    (out / "manifest.json").write_text(json.dumps(_json(manifest), indent=2, default=str))
+    return manifest
+
+
+FIGURE_TWO_ARMS = {
+    "1a": ("perfect knowledge (day-average base set)", 2, "-"),
+    "4d": ("learned, calibrated on delivery", 0, "-"),
+    "5d": ("population, calibrated on delivery", 1, "-"),
+    "4": ("learned, registered rule", 0, "--"),
+    "5": ("population, registered rule", 1, "--"),
+}
+FIGURE_THREE_MODELS = {
+    "4": ("learned", 0, "-"),
+    "5": ("population", 1, "-"),
+    "6": ("stratified", 2, "-"),
+    "4k": ("learned, empty cars known", 0, "--"),
+    "5k": ("population, empty cars known", 1, "--"),
+}
+
+
+def _read(folder: Path, name: str) -> pd.DataFrame:
+    frame = pd.read_csv(folder / name)
+    for col in ("decision_time", "revealed_at"):
+        if col in frame.columns:
+            frame[col] = pd.to_datetime(frame[col], utc=True)
+    if "arm" in frame.columns:
+        frame["arm"] = frame["arm"].astype(str)
+    if "model" in frame.columns:
+        frame["model"] = frame["model"].astype(str)
+    return frame
+
+
+def run_report(results: Path, out: Path, *, rehearsal: bool = False) -> dict:
+    """Figures 1 to 4 and the results table from the three runs after the tag (or their
+    rehearsal), read from `results/evaluate-<period>/`."""
+    out = Path(out)
+    out.mkdir(parents=True, exist_ok=True)
+    prefix = "rehearsal-" if rehearsal else ""
+    folders = {p: Path(results) / f"evaluate-{prefix}{p}" for p in ("evaluation", "sealed", "jpl")}
+    hyp = {p: json.loads((f / "hypotheses.json").read_text()) for p, f in folders.items()}
+    written = []
+
+    # Figure 1: the per-car layer by month, from the sealed run's replay of the whole record.
+    sealed = folders["sealed"]
+    p4, p5 = (_read(sealed, f"predictions_{a}.csv.gz") for a in ("4", "5"))
+    keys = ["decision_time", "session_id"]
+    own = [c for c in p5.columns if c.startswith("population:")]
+    frame = p4.merge(p5[keys + own], on=keys, validate="1:1")
+    local = frame["decision_time"].dt.tz_convert(LOCAL_TZ).dt.tz_localize(None)
+    frame["month"] = local.dt.to_period("M")
+    names = {"gbdt": "learned (trees)", "population": "population"}
+    one = percar.figure_one(frame, names)
+    one.to_csv(out / "figure1.csv", index=False)
+    written.append(
+        plot_monthly(
+            one,
+            percar.FIGURE_LEVEL,
+            out / "figure1.png",
+            rules=list(names.values()),
+            title="Per-car lower bound on remaining stay at level 0.10, Caltech, by month",
+            note="Bounds as the engine uses them (rounded down to 15 minutes, at most 10 hours). "
+            "Each model refitted monthly on what was known then.",
+        )
+    )
+
+    # Figure 2: offer size and days delivered by month, Caltech from September 2019, and JPL.
+    caltech = pd.concat(
+        [_read(folders[p], "monthly.csv") for p in ("evaluation", "sealed")], ignore_index=True
+    )
+    caltech.to_csv(out / "figure2.csv", index=False)
+    note2 = (
+        "Dashed: the registered day-level rule on the one-dimensional fallback offer. Solid: "
+        "the rule calibrated on delivery with the day-average base set, chosen after the May "
+        "to August 2019 look. Scored weekdays only."
+    )
+    written.append(figure_offers(caltech, out / "figure2.png", FIGURE_TWO_ARMS, "Caltech", note2))
+    jpl = _read(folders["jpl"], "monthly.csv")
+    jpl = jpl[(jpl["track"] == "frozen") | jpl["arm"].str.startswith("1")]
+    written.append(
+        figure_offers(jpl, out / "figure2-jpl.png", FIGURE_TWO_ARMS, "JPL, track 1", note2)
+    )
+
+    # Figure 3: the level sweep, frozen evaluation against 2021.
+    sweep_sealed = _read(sealed, "sweep.csv.gz")
+    year = sweep_sealed["decision_time"].dt.tz_convert(LOCAL_TZ).dt.year
+    panels = {
+        "September 2019 to February 2020": _read(folders["evaluation"], "sweep_table.csv"),
+        "2021": levels.table(sweep_sealed[year == 2021], None),
+        "JPL, track 1": _read(folders["jpl"], "sweep_table.csv"),
+    }
+    for form in ("average", "segment"):
+        rows = {k: v for k, v in panels.items() if (v["form"] == form).any()}
+        name = f"figure3-{form}.png"
+        written.append(figure_frontier(rows, out / name, FIGURE_THREE_MODELS, form))
+    pd.concat([v.assign(panel=k) for k, v in panels.items()]).to_csv(
+        out / "figure3.csv", index=False
+    )
+
+    # Figure 4: why fleet offers fail, the secondary arm 4d on Caltech.
+    per_day = pd.concat(
+        [
+            evaluation.failures(
+                _read(folders[p], "days.csv.gz"), _read(folders[p], "cars.csv.gz"), "4d"
+            ).assign(period=p)
+            for p in ("evaluation", "sealed")
+        ],
+        ignore_index=True,
+    )
+    per_day.to_csv(out / "figure4.csv", index=False)
+    written.append(
+        plot_failures(
+            per_day,
+            out / "figure4.png",
+            title="Learned offer calibrated on delivery (4d), Caltech: mispredicted cars per day",
+            note="A car is mispredicted when its deadline or energy bound failed. One point per "
+            "scored weekday from September 2019.",
+        )
+    )
+
+    table = results_table(hyp)
+    (out / "results.md").write_text(table)
+    report = {
+        "hypotheses": hyp,
+        "failures_4d": evaluation.failure_summary(per_day),
+        "theorem": calibrate.requirements_table().to_dict(orient="records"),
+        "days_available": calibrate.days_available().to_dict(orient="records"),
+        "figures": [str(p) for p in written],
+    }
+    (out / "report.json").write_text(json.dumps(_json(report), indent=2, default=str))
+    return report
+
+
+def figure_offers(monthly, path, arms, site, note) -> Path:
+    from fleetoffer.figures import plot_offers_monthly
+
+    keep = monthly[monthly["arm"].isin(arms)]
+    return plot_offers_monthly(
+        keep,
+        path,
+        arms=arms,
+        title=f"Offer size and days delivered by month, {site}",
+        note=note,
+    )
+
+
+def figure_frontier(panels, path, models, form) -> Path:
+    from fleetoffer.figures import plot_frontier
+
+    label = {"average": "day-average base set", "segment": "one-dimensional fallback"}[form]
+    return plot_frontier(
+        panels,
+        path,
+        models=models,
+        form=form,
+        title=f"Offer size against days delivered at every shared level ({label})",
+        note="Each point is one shared quantile level, averaged over the scored weekdays; "
+        "delivery under the allocation fixed at 10:00. Dashed: the diagnostic in which the cars "
+        "with nothing left to take are known (a perfect-knowledge yardstick).",
+    )
+
+
+def _fmt(x, digits=2) -> str:
+    try:
+        return f"{float(x):.{digits}f}"
+    except (TypeError, ValueError):
+        return str(x)
+
+
+def results_table(hyp: dict) -> str:
+    """The results table: every hypothesis with its reading and the numbers beside it."""
+    lines = ["| Hypothesis | Design | Reading | Numbers |", "|---|---|---|---|"]
+    ev, se = hyp["evaluation"], hyp["sealed"]
+    for key, design in (("h1_registered", "registered"), ("h1_secondary", "on delivery")):
+        c = ev.get(key, {}).get("one_week", {})
+        rel = c.get("relative", {})
+        lines.append(
+            f"| H1, learned against population, Sep 2019 to Feb 2020 | {design} | "
+            f"{c.get('reading', '')} | {_fmt(c.get('mean_a_kwh'))} against "
+            f"{_fmt(c.get('mean_b_kwh'))} kWh; delivered {_fmt(c.get('delivered_a'))} and "
+            f"{_fmt(c.get('delivered_b'))}; relative {_fmt(rel.get('estimate'))} "
+            f"[{_fmt(rel.get('low'))}, {_fmt(rel.get('high'))}] |"
+        )
+    h2 = ev.get("h2", {})
+    lines.append(
+        f"| H2, union bound | registered | {h2.get('reading', '')} | delivered "
+        f"{_fmt(h2.get('delivered_3'))}; {_fmt(h2.get('size_3_kwh'))} against arm 4 "
+        f"{_fmt(h2.get('size_4_kwh'))} kWh |"
+    )
+    for pair, design in (("4 against 4f", "registered"), ("4d against 4df", "on delivery")):
+        h3 = se.get("h3", {}).get(pair, {})
+        lines.append(
+            f"| H3a, frozen offer after the reopening ({se.get('reopening', '')}) | {design} | "
+            f"{h3.get('h3a', h3.get('reading', ''))} | first 20 scored weekdays delivered "
+            f"{_fmt(h3.get('frozen_first20_delivered'))} |"
+        )
+        lines.append(
+            f"| H3b, adaptive recovery | {design} | {h3.get('h3b', '')} | 90% over 20 reached "
+            f"at scored weekday {h3.get('adaptive_reached_at_scored_weekday')} |"
+        )
+    h4 = ev.get("h4", {})
+    lines.append(
+        f"| H4, per-car stay bound at matched 90% | per car | {h4.get('reading', '')} | "
+        f"{_fmt(h4.get('learned_hours'))} against {_fmt(h4.get('population_hours'))} h; coverage "
+        f"{_fmt(h4.get('learned_coverage'))} and {_fmt(h4.get('population_coverage'))} |"
+    )
+    jpl = hyp.get("jpl", {})
+    for track, label in (("frozen", "track 1, frozen"), ("updating", "track 2, updating")):
+        for key, design in (("h1_registered", "registered"), ("h1_secondary", "on delivery")):
+            c = jpl.get(track, {}).get(key, {}).get("one_week", {})
+            if not c:
+                continue
+            lines.append(
+                f"| JPL, {label}, learned against population (descriptive) | {design} | "
+                f"{c.get('reading', '')} | {_fmt(c.get('mean_a_kwh'))} against "
+                f"{_fmt(c.get('mean_b_kwh'))} kWh; delivered {_fmt(c.get('delivered_a'))} and "
+                f"{_fmt(c.get('delivered_b'))} |"
+            )
+    need = calibrate.requirements_table()
+    have = calibrate.days_available().set_index("span")["weekdays"]
+    lines.append(
+        "| Theorem against data (Yan, Parise and Bitar, 2022) | days as samples | no certificate "
+        "claimed | Theorem 4 needs "
+        + " and ".join(f"{n:,}" for n in need["theorem4_from"])
+        + " days, Corollary 1 "
+        + " and ".join(f"{n:,}" for n in need["corollary1"])
+        + " (α = 0.02, θ = 0.04 and α = 0.05, θ = 0.025); weekdays available: "
+        + "; ".join(f"{span} {n:,}" for span, n in have.items())
+        + " |"
+    )
+    return "\n".join(lines) + "\n"
+
+
 def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
@@ -713,6 +990,21 @@ def main(argv: list[str] | None = None) -> int:
     lev.add_argument("--out", type=Path, default=Path("results/levels"))
     lev.add_argument("--workers", type=int, default=10)
 
+    ev = commands.add_parser(
+        "evaluate",
+        help="a run after the analysis-plan tag (the frozen evaluation, sealed Caltech, JPL), "
+        "or its rehearsal on development data",
+    )
+    ev.add_argument("period", choices=evaluation.PERIODS)
+    ev.add_argument("--data", type=Path, default=Path("data"))
+    ev.add_argument("--out", type=Path, default=None)
+    ev.add_argument("--workers", type=int, default=10)
+
+    rep = commands.add_parser("report", help="Figures 1 to 4 and the results table")
+    rep.add_argument("--results", type=Path, default=Path("results"))
+    rep.add_argument("--out", type=Path, default=None)
+    rep.add_argument("--rehearsal", action="store_true")
+
     commands.add_parser(
         "requirements",
         help="days the 2022 drift theorem needs for a 90%%-of-days offer, beside the days held",
@@ -791,6 +1083,16 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "levels":
         manifest = run_levels(args.data, args.out, workers=args.workers)
         print(f"wrote the level sweep to {args.out} in {manifest['seconds']:.0f} s")
+    elif args.command == "evaluate":
+        unseal = args.period in ("sealed", "jpl")  # a deliberate run of a sealed period
+        out = args.out or Path("results") / f"evaluate-{args.period}"
+        manifest = run_evaluation(args.period, args.data, out, unseal=unseal, workers=args.workers)
+        print(f"wrote {manifest['run']} to {out} in {manifest['seconds']:.0f} s")
+    elif args.command == "report":
+        folder = "report-rehearsal" if args.rehearsal else "report"
+        out = args.out or args.results / folder
+        report = run_report(args.results, out, rehearsal=args.rehearsal)
+        print(f"wrote {len(report['figures'])} figures and the results table to {out}")
     elif args.command == "requirements":
         print(calibrate.requirements_table().to_string(index=False))
         print()

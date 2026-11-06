@@ -326,6 +326,11 @@ def load_items(
             f"{site} sessions from {start:%d %B %Y} are the main test period; they open only "
             f"once the '{PLAN_TAG}' tag exists in git"
         )
+    if site in SEALED_SITES and unseal and not plan_is_tagged():
+        raise SealedSiteError(
+            f"{site} is the sealed replication site; it opens only once the '{PLAN_TAG}' tag "
+            "exists in git"
+        )
     sealed = start is not None and not unseal
     items: list[dict] = []
     for month in stored_months(data_root, site):

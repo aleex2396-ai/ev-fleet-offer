@@ -42,13 +42,8 @@ RUNS = (
 MATCHED_DELIVERY = (0.90, 0.95)  # delivery rates at which models are compared
 
 
-def run_one(data_root: str, model: str, form: str) -> dict:
-    """One model and one form over development data to August 2019, offers from May 2019."""
-    if model == "1":
-        oracle = options.run_one(data_root, "1", form)["days"]
-        return {"model": model, "form": form, "oracle": oracle}
-    sessions, entries = percar.load(Path(data_root))
-    base = training_base_set(sessions, percar.SPLIT_END)
+def sweep_rule(model: str, form: str, base, offers_from=SELECTION_START) -> LevelSweep:
+    """The sweep of one model ("4", "5", "6", or with "k" the diagnostic) and one form."""
     known = model.endswith("k")
     per_car = make_arm(model[0]).per_car
     if known:
@@ -57,23 +52,37 @@ def run_one(data_root: str, model: str, form: str) -> dict:
             if isinstance(m, Population):
                 m.energy_left_only = True
     label = MODELS[model[0]] + (", empty cars known" if known else "")
-    rule = LevelSweep(
+    return LevelSweep(
         per_car,
         {form: options.make_offer(form, base)},
-        offers_from=SELECTION_START,
+        offers_from=offers_from,
         drop_empty=known,
         name=f"{model} {label}, level sweep | {form}",
     )
+
+
+def sweep_rows(rule: LevelSweep, model: str) -> pd.DataFrame:
+    label = MODELS[model[0]] + (", empty cars known" if model.endswith("k") else "")
+    return pd.DataFrame(rule.log).assign(model=model, model_name=label)
+
+
+def run_one(data_root: str, model: str, form: str) -> dict:
+    """One model and one form over development data to August 2019, offers from May 2019."""
+    if model == "1":
+        oracle = options.run_one(data_root, "1", form)["days"]
+        return {"model": model, "form": form, "oracle": oracle}
+    sessions, entries = percar.load(Path(data_root))
+    base = training_base_set(sessions, percar.SPLIT_END)
+    rule = sweep_rule(model, form, base)
     fleet_replay(
         sessions,
         rule,
         entries=entries,
         until=percar.SELECTION_END,
         method="bounds",
-        reveal_empty=known,
+        reveal_empty=rule.drop_empty,
     )
-    sweep = pd.DataFrame(rule.log).assign(model=model, model_name=label)
-    return {"model": model, "form": form, "sweep": sweep}
+    return {"model": model, "form": form, "sweep": sweep_rows(rule, model)}
 
 
 def run_all(data_root: Path, workers: int = 10, store: Path | None = None) -> list[dict]:
@@ -81,15 +90,17 @@ def run_all(data_root: Path, workers: int = 10, store: Path | None = None) -> li
     return options.run_saved(run_one, jobs, workers, store)
 
 
-def scored(rows: pd.DataFrame, start: pd.Timestamp = SELECTION_START) -> pd.DataFrame:
+def scored(rows: pd.DataFrame, start: pd.Timestamp | None = SELECTION_START) -> pd.DataFrame:
     """The scored weekdays from `start`: at least five cars with energy remaining (check D3)."""
-    keep = (rows["decision_time"] >= start) & (rows["cars_with_energy"] >= D3_MIN_CARS)
+    keep = rows["cars_with_energy"] >= D3_MIN_CARS
+    if start is not None:
+        keep &= rows["decision_time"] >= start
     return rows[keep].reset_index(drop=True)
 
 
-def table(sweep: pd.DataFrame) -> pd.DataFrame:
+def table(sweep: pd.DataFrame, start: pd.Timestamp | None = SELECTION_START) -> pd.DataFrame:
     """Per model, form and level, over the scored days."""
-    rows = scored(sweep)
+    rows = scored(sweep, start)
     for col in ("fixed_delivered", "hindsight_delivered", "all_bounds_held"):
         rows[col] = rows[col].astype(float)
     grouped = rows.groupby(["model", "model_name", "form", "level"], sort=True)
@@ -122,9 +133,11 @@ def table(sweep: pd.DataFrame) -> pd.DataFrame:
     return out.reset_index()
 
 
-def oracle_table(oracle: pd.DataFrame) -> pd.DataFrame:
+def oracle_table(
+    oracle: pd.DataFrame, start: pd.Timestamp | None = SELECTION_START
+) -> pd.DataFrame:
     """Arm 1 per form, over the same scored days."""
-    rows = scored(oracle[oracle["size_kwh"].notna()])
+    rows = scored(oracle[oracle["size_kwh"].notna()], start)
     return (
         rows.assign(
             fixed_delivered=rows["fixed_delivered"].astype(float),

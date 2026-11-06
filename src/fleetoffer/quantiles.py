@@ -33,7 +33,7 @@ from __future__ import annotations
 import time
 import warnings
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 import pandas as pd
@@ -408,6 +408,9 @@ class PerCarRule(FleetRule):
         self.name = name or models[0].name
         self.calendar = calendar
         self.energy_left_only = energy_left_only  # train on car-days that took energy only
+        self.frozen = False  # no refit from now on (`evaluation.Frozen`)
+        self.hide_history = False  # no other session's history in the inputs (JPL, track 1)
+        self.keep_fit_if_short = False  # keep the last fit while a new window is too short
         self.origin: pd.Timestamp | None = None
         self.fitted: dict[str, bool] = {}
         self.fit_log: list[dict] = []
@@ -424,9 +427,11 @@ class PerCarRule(FleetRule):
         return pd.concat(self._known, ignore_index=True)
 
     def bounds(self, day: DayView) -> tuple[np.ndarray, np.ndarray]:
+        if self.hide_history:
+            day = replace(day, ended=day.ended.iloc[:0])
         feats = at_decision(day, calendar=self.calendar)
         origin = month_origin(day.decision_time)
-        if origin != self.origin:
+        if origin != self.origin and not self.frozen:
             self._refit(origin, day)
         self._waiting[day.decision_time] = feats
         columns: dict[str, np.ndarray] = {}
@@ -459,19 +464,28 @@ class PerCarRule(FleetRule):
         self.ended_at_origin[origin] = ended_rows(day.ended, origin)
         for model in self.models:
             ok = len(train) >= self.min_rows
+            kept = not ok and self.keep_fit_if_short and self.fitted.get(model.name, False)
             start = time.perf_counter()
             if ok:
                 model.fit(train, ended, origin)
-            self.fitted[model.name] = ok
+            self.fitted[model.name] = ok or kept
             self.fit_log.append(
                 {
                     "model": model.name,
                     "origin": origin,
                     "rows": len(train),
                     "fitted": ok,
+                    "kept_earlier_fit": kept,
                     "seconds": time.perf_counter() - start,
                 }
             )
+
+    def forget_history(self) -> None:
+        """Drop every car-day seen so far and keep the fitted models (JPL, track 2: the
+        Caltech-trained pipeline then learns from JPL outcomes only)."""
+        self._known = []
+        self._waiting = {}
+        self.keep_fit_if_short = True
 
     def observe(self, outcome: DayOutcome) -> None:
         feats = self._waiting.pop(outcome.decision_time)

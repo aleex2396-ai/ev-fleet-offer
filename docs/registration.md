@@ -36,12 +36,12 @@ here and in `docs/theory.md`.
 
 | Item | Fixed as | Where |
 |---|---|---|
-| Programme | (24) of Al Taha, Vincent and Bitar with α ≥ 0, irredundant rows, HiGHS interior point with crossover | `offer.solve`, `offer.SOLVER`; `docs/theory.md` |
-| Base set U₀ | h₀ from the training cars through April 2019, the same for every arm; the day-average base set of the paper's equation (11) as a sensitivity | `engine.training_base_set`; values under D12 below |
+| Programme | (24) of Al Taha, Vincent and Bitar with α ≥ 0, irredundant rows, HiGHS interior point with crossover; the dual simplex method on a day the interior-point method returns no answer; a base set whose energy ceiling is at most 10⁻⁷ kWh is treated as empty (α = 0) | `offer.solve`, `offer.SOLVER`, `offer.TRIVIAL_BASE_KWH`; `docs/theory.md` |
+| Base set U₀ | h₀ from the training cars through April 2019, the same for every arm, committed as a file and loaded by every run after the tag; the day-average base set of the paper's equation (11) as a sensitivity | `src/fleetoffer/h0.json`, `evaluation.base_set`; values under D12 below |
 | Nine profiles | Most and least cumulative energy at 12:00, 14:00, 16:00 and 18:00, and the least-cost profile under the stylised tariff | `offer.checked_profiles`, `offer.TARIFF` |
 | Delivered | All nine profiles within 10⁻⁴ kWh under the allocation fixed at 10:00 (primary); the hindsight split (secondary) | `offer.DELIVERY_TOL_KWH` |
 | Size | Width of the offer's cumulative-energy band at 14:00, 16:00 and 18:00, averaged, in kWh, with α | `offer.SIZE_CHECKPOINTS` |
-| Fallback | One-dimensional offer b + a·v, used for the whole sealed run if D9 calls for it | `offer.py`; `docs/theory.md` |
+| Fallback | One-dimensional offer b + a·v. D9 called for it (below), so it is the offer of every registered arm in every run after the tag | `offer.solve_segment`, `evaluation.REGISTERED_FORM`; `docs/theory.md` |
 
 ## Day-level rules
 
@@ -67,9 +67,12 @@ here and in `docs/theory.md`.
 
 | Item | Fixed as | Where |
 |---|---|---|
-| Reopening | The first weekday of 2021 from which the running average over ten weekdays of cars present at 10:00 is at least five; H3's window starts there | plan, Section 7 |
-| Recovery window | A 90% running average of delivered days over 20 weekdays, reached within 40 scored weekdays of the reopening | plan, Section 9 (H3) |
-| JPL | Two tracks: the Caltech-trained pipeline with no JPL updates (primary), and the same pipeline updating from JPL outcomes as they mature | plan, Section 7 |
+| Reopening | The first weekday of 2021 on which the average of cars present at 10:00 over the last ten weekdays, that day included, is at least five (each day's average uses that day and earlier weekdays only, so the rule runs in time order); H3's window starts there | `evaluation.reopening` |
+| H3's frozen offer | Arms 4 and 5 (and 4d and 5d in the secondary analysis) whose learning stops on 1 March 2020: no refit, no new day score, the calibration level in force that day; delivered on fewer than 80% of the first 20 scored weekdays from the reopening | `evaluation.Frozen`, `evaluation.h3` |
+| Recovery window | A 90% running average of delivered days over 20 scored weekdays, reached within 40 scored weekdays of the reopening, by arm 4 (arm 5 and the secondary arms reported beside it) | `evaluation.h3` |
+| JPL | Every weekday of JPL's record, in two tracks, both starting from the pipeline as it stood at the end of the frozen development evaluation (every refit and day score through February 2020). Track 1 (primary): that pipeline frozen, shown no JPL driver history. Track 2: its Caltech car-days and day scores dropped, its fitted models and working miss level kept, learning from JPL outcomes as they mature and refitting once a JPL window holds 200 car-days | `evaluation.for_jpl`, `evaluation.run_jpl` |
+| Uncertainty for H1 | One-week blocks; two-week blocks as the sensitivity | `evaluation.paired` |
+| Decision time and cap sensitivities | The decision at 09:00 (the horizon, checkpoints and tariff counted in steps from 09:00, so ending at 19:00) and power caps of 3.3 and 11 kW, each a separate replay from the first download month: the oracle and arms 4 and 5 under the registered design, and 1a, 4d and 5d under the secondary analysis, on the frozen evaluation and the sealed months, not at JPL; H1's contrast at each setting, descriptive | `evaluation.SENSITIVITIES` |
 | Earlier looks | `docs/prior-looks.md` | |
 | Predictions | Written before any fleet-layer development result was seen | `docs/predictions.md` |
 
@@ -93,8 +96,33 @@ Run by `fleetoffer checks`; outputs in `results/checks/`. D2 to D7 and D12 are i
 | D12, the base set | Non-empty, positive width at all 40 steps | h₀ below |
 
 D9 (the programme's degeneracy and run time), the share of days on which α = 0, and the
-week-to-week spread of offer sizes come from the offers themselves; they are added with the
-fleet-layer development results once the written predictions are stored.
+week-to-week spread of offer sizes come from the offers themselves. They were computed after
+the written predictions were stored (`docs/predictions.md`), on the 85 scored weekdays of May
+to August 2019:
+
+| Check | Result | Consequence |
+|---|---|---|
+| D9, the programme | The oracle's α was below 0.2 on 37.6% of scored weekdays (threshold 25%); none of the 704 solves of the eight learned and population arms took over 60 seconds (longest 0.37 s), and the oracle's, whose sets are larger, took at most 25 s | The one-dimensional fallback for every registered arm after the tag |
+| α = 0 | On the fixed base set, α = 0 on every day for every arm but the oracle (37.6%); on the day-average base set, on 100% of days for arms 3 and 4, 95.3% for arm 6, 3.5% for arm 5 | Reported; the registered rule's learned offer is zero (`docs/data.md`) |
+| Spread, registered rule | Every learned and population offer zero, so the spread is zero | No reading of H1's 10% is possible under the registered rule |
+| Spread, secondary analysis | Day-average base set, calibrated on delivery: weekly difference sd 0.36 kWh, projected standard error over 26 weeks 0.071 kWh, 10% of the population offer 0.155 kWh | No threshold reset |
+
+## Added after the first fleet run (May to August 2019)
+
+The registered day-level rule gave a learned offer of zero on every scored weekday of May to
+August 2019. The analyses below were chosen after that look; they are fixed here, before the
+tag, for every later period, so their later results are prospective, but their origin is
+exploratory. The registered design stays the primary result.
+
+| Item | Fixed as | Where |
+|---|---|---|
+| Secondary analysis | Arms 4, 5 and 6 with the primary rule's adaptive conformal inference applied to a day score on delivery: the largest level of the 17 levels (0 and the quantile grid) at which the offer, made again from that morning's bounds once the outcome is known, was delivered under the fixed allocation at that level and every lower one; programme (24) on the day-average base set; the oracle on the same base set beside them (arms 4d, 5d, 6d, 1a) | `daylevel.DeliveryCalibrated`, `evaluation.SECONDARY` |
+| H1 under both designs | Arm 4 against arm 5 and arm 4d against arm 5d; where both arms offer zero on every day, H1 reads "not testable: both arms offer zero" | `evaluation.paired` |
+| Level sweep (descriptive) | For each scored weekday, model (4, 5, 6) and offer form (fixed base set, day-average base set, fallback), the offer at each of the 17 levels made from that morning's bounds: size, delivery under the fixed allocation and with the hindsight split, whether every bound held, the cars given a zero energy ceiling or a zero stay. At JPL the fallback form only (programme (24) at every level of every JPL day does not fit the time available) | `daylevel.LevelSweep`, `levels.py`, `evaluation.SWEEP_FORMS` |
+| Hindsight ceiling | The sweep's curve with hindsight delivery: the largest offer of the form that a per-request split chosen with hindsight could deliver; an upper bound, not a method that could be deployed, and not the registered service | `levels.table` |
+| Matched comparison | Per model and form, the largest mean offer among the swept levels delivered on at least 90% (and 95%) of scored weekdays, with no interpolation | `levels.matched` |
+| Diagnostic, empty cars known | The sweep when the cars that truly take nothing after 10:00 (at most 10⁻⁹ kWh, check D4's zero) are known and dropped, and the per-car models are refitted on car-days that took energy; a perfect-knowledge yardstick for live charging status at 10:00, not a method that could be deployed | `LevelSweep(drop_empty=True)`, `fleet_replay(reveal_empty=True)` |
+| Rehearsal | Every run after the tag was first run end to end on Caltech development data (June to August 2019); its numbers are not results | `fleetoffer evaluate rehearsal-*` |
 
 **h₀, the base set's power limit (kW) at the start of each 15-minute step**, from every car
 present at 10:00 on a weekday through April 2019; energy limit 5.774 kWh:

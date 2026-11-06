@@ -104,12 +104,16 @@ def test_load_sessions_reads_all_stored_months(tmp_path):
     assert data.missing_months(tmp_path, "caltech", "2019-05", "2019-08") == ["2019-05", "2019-08"]
 
 
-def test_replication_site_is_sealed(tmp_path):
+def test_replication_site_is_sealed(tmp_path, monkeypatch):
     store(tmp_path, "jpl")
     with pytest.raises(data.SealedSiteError):
         data.load_sessions(tmp_path, "jpl")
     with pytest.raises(data.SealedSiteError):
         data.load_user_inputs(tmp_path, "jpl")
+    monkeypatch.setattr(data, "plan_is_tagged", lambda: False)
+    with pytest.raises(data.SealedSiteError):
+        data.load_sessions(tmp_path, "jpl", unseal=True)
+    monkeypatch.setattr(data, "plan_is_tagged", lambda: True)
     kept, _ = data.load_sessions(tmp_path, "jpl", unseal=True)
     assert len(kept) == 3
 

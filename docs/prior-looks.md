@@ -131,3 +131,22 @@ above). What this repository has computed since is listed in the next section.
   with steps of 0.17 and 0.02, were stopped before any fleet output was written; the D3 counts
   of the second were read, and are the same counts. Nothing from September 2019 onward was
   scored.
+- Runs chosen after the fleet layer's first results (`docs/registration.md`, "Added after
+  the first fleet run"), on the weekdays of May to August 2019 only. The options run
+  (`fleetoffer options`): arms 4, 5 and 6 calibrated on delivery, each with the fixed base set,
+  the day-average base set and the one-dimensional offer, the oracle with each, and the
+  registered arms 4 and 5 under the one-dimensional offer; offer sizes, delivery, day scores,
+  calibration levels, the share of days with α = 0 and the week-to-week spread. Two first
+  attempts stopped on solver failures (a base set with an energy ceiling of order 10⁻¹² kWh;
+  a day on which the interior-point method returned no answer) before writing any output, and
+  were rerun whole after the fixes in `offer.py`. The level sweep
+  (`fleetoffer levels`): the offer of each model and form at every level of the delivery
+  grid, with its delivery, its zero-ceiling and zero-stay counts and the oracle beside it, and
+  the same sweep with the cars that take nothing after 10:00 known in advance. These analyses
+  were chosen because of what the first fleet run showed, so on these months they are
+  exploratory, not tests. Nothing from September 2019 onward was scored.
+- A rehearsal of every run made after the tag, on Caltech development data only (the frozen
+  evaluation run with offers in June 2019, the sealed run with its freeze, H3 reading and
+  reopening rule moved to 1 July 2019, and the JPL run with Caltech sessions from June 2019
+  standing in for the second site), to check that each path runs from start to end. Its
+  numbers are not results and were read only for errors.
