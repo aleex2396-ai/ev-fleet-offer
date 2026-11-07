@@ -276,7 +276,8 @@ def trained_on_caltech(data_root: str, rule: FleetRule, until=EVALUATION_END) ->
         sessions, entries = load(data_root, "evaluation")
     else:
         sessions, entries = percar.load(Path(data_root))
-    fleet_replay(sessions, rule, entries=entries, until=until, method="bounds")
+    reveal = getattr(rule, "drop_empty", False)  # the sweep's diagnostic learns as it is run
+    fleet_replay(sessions, rule, entries=entries, until=until, method="bounds", reveal_empty=reveal)
     return rule
 
 

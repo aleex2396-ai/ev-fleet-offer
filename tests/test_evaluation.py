@@ -226,3 +226,18 @@ def test_the_monthly_delivery_rate_comes_with_a_week_block_interval():
     assert table["days"].sum() == 40
     full = evaluation.monthly(days.assign(fixed_delivered=True))
     assert (full["fixed_delivered_low"] == 1).all() and (full["fixed_delivered_high"] == 1).all()
+
+
+def test_the_jpl_sweep_with_the_empty_cars_known_trains_and_runs(monkeypatch):
+    from fleetoffer import percar
+
+    sessions = make_sessions(
+        [Regime("2019-01-07", sessions_per_weekday=12, median_stay_h=6.0, drivers=40)],
+        "2019-05-20",
+        seed=4,
+    )
+    sessions, entries = with_app_entries(sessions, seed=4)
+    monkeypatch.setattr(evaluation, "load", lambda *args, **kwargs: (sessions, entries))
+    monkeypatch.setattr(percar, "load", lambda *args, **kwargs: (sessions, entries))
+    out = evaluation.run_sweep("d", "rehearsal-jpl", "5k", "segment")
+    assert len(out["sweep"]) > 20 and (out["sweep"]["dropped_cars"] >= 0).all()
