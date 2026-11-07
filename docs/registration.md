@@ -79,8 +79,9 @@ here and in `docs/theory.md`.
 
 ## The checks before the tag
 
-Run by `fleetoffer checks`; outputs in `results/checks/`. D2 to D7 and D12 are in
-`docs/data.md` with their numbers; in short:
+Run by `fleetoffer checks`; outputs in `results/checks/`. The numbers below are from a clean
+rerun from committed code before the tag, whose results matched the first run's except for
+solver run times. D2 to D7 and D12 are in `docs/data.md` with their numbers; in short:
 
 | Check | Result | Consequence |
 |---|---|---|
@@ -103,8 +104,9 @@ to August 2019:
 
 | Check | Result | Consequence |
 |---|---|---|
-| D9, the programme | The oracle's α was below 0.2 on 37.6% of scored weekdays (threshold 25%); none of the 704 solves of the eight learned and population arms took over 60 seconds (longest 0.37 s), and the oracle's, whose sets are larger, took at most 25 s | The one-dimensional fallback for every registered arm after the tag |
+| D9, the programme | The oracle's α was below 0.2 on 37.6% of scored weekdays (threshold 25%); none of the 704 solves of the eight learned and population arms took over 60 seconds (longest 1.1 s), and the oracle's, whose sets are larger, took at most 25 s | The one-dimensional fallback for every registered arm after the tag |
 | α = 0 | On the fixed base set, α = 0 on every day for every arm but the oracle (37.6%); on the day-average base set, on 100% of days for arms 3 and 4, 95.3% for arm 6, 3.5% for arm 5 | Reported; the registered rule's learned offer is zero (`docs/data.md`) |
+| Late outcomes | On the 83 scored weekdays of arms 4, 5 and 6, 78.3% of outcomes were known before the next decision; at most 4 were pending at once | Reported; with 4 pending at once the bound on the share of failed days in `docs/theory.md` becomes 10% + (a_S + 4.5γ)/(γT), 16.8% at 116 days from a₁ (computed) |
 | Spread, registered rule | Every learned and population offer zero, so the spread is zero | No reading of H1's 10% is possible under the registered rule |
 | Spread, secondary analysis | Day-average base set, calibrated on delivery: weekly difference sd 0.36 kWh, projected standard error over 26 weeks 0.071 kWh, 10% of the population offer 0.155 kWh | No threshold reset |
 

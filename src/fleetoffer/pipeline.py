@@ -114,6 +114,7 @@ def run_demo(
     offer is also built from each car's true set (the oracle) and checked, where the answer
     is known: every day must be delivered and no offer may exceed the exact band.
     """
+    code = _git_state()  # the commit the run starts from
     out = Path(out)
     out.mkdir(parents=True, exist_ok=True)
     sessions = make_sessions(regimes or demo_regimes(), end, tz=DEMO_TZ, seed=seed)
@@ -164,7 +165,7 @@ def run_demo(
         "run": "demo",
         "made_at_utc": datetime.now(UTC).isoformat(timespec="seconds"),
         "package_version": __version__,
-        "code": _git_state(),
+        "code": code,
         "python": platform.python_version(),
         "pandas": pd.__version__,
         "parameters": {
@@ -355,6 +356,7 @@ def charging_done_counts(sessions: pd.DataFrame) -> dict:
 
 def run_d1(data_root: Path, out: Path) -> dict:
     """Check D1 on the stored sample: share usable, and integrated against recorded energy."""
+    code = _git_state()  # the commit the run starts from
     out = Path(out)
     out.mkdir(parents=True, exist_ok=True)
     sessions, _ = data.load_sessions(data_root, "caltech")
@@ -374,7 +376,7 @@ def run_d1(data_root: Path, out: Path) -> dict:
         "run": "d1",
         "made_at_utc": datetime.now(UTC).isoformat(timespec="seconds"),
         "package_version": __version__,
-        "code": _git_state(),
+        "code": code,
         "parameters": {"sample": D1_SAMPLE, "seed": D1_SEED, "volts": data.VOLTS},
         "inputs": {"series": acn.fingerprint(records), "sessions": len(sessions)},
         "outputs": sorted(p.name for p in out.iterdir() if p.name != "manifest.json"),
@@ -388,6 +390,7 @@ FIGURE_ONE_RULES = {"gbdt": "learned (trees)", "population": "population"}
 
 def run_percar(data_root: Path, out: Path) -> dict:
     """The per-car layer on Caltech's months through August 2019 (`percar`)."""
+    code = _git_state()  # the commit the run starts from
     out = Path(out)
     out.mkdir(parents=True, exist_ok=True)
     clock = {}
@@ -435,7 +438,7 @@ def run_percar(data_root: Path, out: Path) -> dict:
         "run": "percar",
         "made_at_utc": start.isoformat(timespec="seconds"),
         "package_version": __version__,
-        "code": _git_state(),
+        "code": code,
         "python": platform.python_version(),
         "pandas": pd.__version__,
         "until": str(percar.SELECTION_END),
@@ -472,6 +475,7 @@ def run_checks(data_root: Path, out: Path, workers: int = 9) -> dict:
     days with a zero offer, the week-to-week spread, sizes and delivery by arm) goes to
     `out/fleet`, kept apart so it can be withheld until predictions are written.
     """
+    code = _git_state()  # the commit the run starts from
     out, fleet_out = Path(out), Path(out) / "fleet"
     fleet_out.mkdir(parents=True, exist_ok=True)
     start = datetime.now(UTC)
@@ -548,7 +552,7 @@ def run_checks(data_root: Path, out: Path, workers: int = 9) -> dict:
         "run": "checks",
         "made_at_utc": start.isoformat(timespec="seconds"),
         "package_version": __version__,
-        "code": _git_state(),
+        "code": code,
         "python": platform.python_version(),
         "seconds": (datetime.now(UTC) - start).total_seconds(),
         "arms": list(devchecks.ARMS),
@@ -562,6 +566,7 @@ def run_checks(data_root: Path, out: Path, workers: int = 9) -> dict:
 def run_options(data_root: Path, out: Path, workers: int = 10) -> dict:
     """Day-level calibration on delivery and the fallback offer, on the model-selection months
     only (`options`). Everything here is computed from offers."""
+    code = _git_state()  # the commit the run starts from
     out = Path(out)
     out.mkdir(parents=True, exist_ok=True)
     start = datetime.now(UTC)
@@ -577,7 +582,7 @@ def run_options(data_root: Path, out: Path, workers: int = 10) -> dict:
         "run": "options",
         "made_at_utc": start.isoformat(timespec="seconds"),
         "package_version": __version__,
-        "code": _git_state(),
+        "code": code,
         "python": platform.python_version(),
         "seconds": (datetime.now(UTC) - start).total_seconds(),
         "runs": [list(r) for r in options.RUNS],
@@ -589,6 +594,7 @@ def run_options(data_root: Path, out: Path, workers: int = 10) -> dict:
 
 def run_levels(data_root: Path, out: Path, workers: int = 10) -> dict:
     """The level sweep on the model-selection months only (`levels`)."""
+    code = _git_state()  # the commit the run starts from
     out = Path(out)
     out.mkdir(parents=True, exist_ok=True)
     start = datetime.now(UTC)
@@ -608,7 +614,7 @@ def run_levels(data_root: Path, out: Path, workers: int = 10) -> dict:
         "run": "levels",
         "made_at_utc": start.isoformat(timespec="seconds"),
         "package_version": __version__,
-        "code": _git_state(),
+        "code": code,
         "python": platform.python_version(),
         "solver": offer.SOLVER,
         "seconds": (datetime.now(UTC) - start).total_seconds(),
@@ -636,6 +642,7 @@ def run_evaluation(
 ) -> dict:
     """One of the runs after the tag (`evaluation`): every arm, the H3 arms on the sealed
     months, both JPL tracks, and the level sweep; tables, hypotheses and a manifest."""
+    code = _git_state()  # the commit the run starts from
     if not evaluation.is_rehearsal(period) and not data.plan_is_tagged():
         raise data.SealedPeriodError(f"the runs after the tag need the '{data.PLAN_TAG}' tag")
     out = Path(out)
@@ -673,7 +680,7 @@ def run_evaluation(
         "run": f"evaluate {period}",
         "made_at_utc": start.isoformat(timespec="seconds"),
         "package_version": __version__,
-        "code": _git_state(),
+        "code": code,
         "python": platform.python_version(),
         "solver": offer.SOLVER,
         "seconds": (datetime.now(UTC) - start).total_seconds(),
