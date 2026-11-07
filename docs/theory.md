@@ -148,8 +148,8 @@ development data before the tag, beside the paper's own day-average base set.
 ## Zero ceilings at small levels
 
 The day-level rules give every present car its two bounds at one shared level q, and the
-level they need is small: the union bound uses q = α/(2n), 0.29% for α = 0.10 and the median
-of 17.5 cars present at 10:00 on the scored weekdays of May to August 2019. At this site the
+level they need is small: the union bound uses q = α/(2n), 0.28% for α = 0.10 and the median
+of 18 cars present at 10:00 on the 85 scored weekdays of May to August 2019. At this site the
 energy a car will still take after 10:00 has an atom at zero: by check D4, 16.4% of the
 9,128 car-days at 10:00 through August 2019 take nothing more (an estimate of at most
 10⁻⁹ kWh). This section states what that atom does to a lower bound at a small level. It was
@@ -186,8 +186,8 @@ offer, whose size is its band width at the checkpoints, is at most the exact ban
 learned fleet there (`exact_learned_kwh` in every run); the one-dimensional offer's amplitude
 is at most half that width at 11:00, since its two ends differ by twice the amplitude in
 cumulative energy at 11:00. Either way only cars with πᵢ < q (and a positive deadline)
-contribute. At q = 0.29% a car adds to the offer only if the inputs at 10:00 rule out, to
-within 0.29%, that it will take nothing more. With 16.4% of car-days empty, that needs inputs
+contribute. At q = 0.28% a car adds to the offer only if the inputs at 10:00 rule out, to
+within 0.28%, that it will take nothing more. With 16.4% of car-days empty, that needs inputs
 that separate the empty cars from the others almost perfectly. The containment proposition
 above holds at every level; it assumes the bounds hold, not that they are informative. At
 this atom and these levels, the bounds that hold are zero for most cars, so what is contained
