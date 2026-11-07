@@ -36,7 +36,9 @@ import os
 import pickle
 import time
 import warnings
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from concurrent.futures import ProcessPoolExecutor
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 
@@ -229,6 +231,27 @@ def stored_fit(model: QuantileModel, train: pd.DataFrame, fit: Callable[[], dict
         partial.write_bytes(pickle.dumps(state))
         partial.replace(path)
         return state
+
+
+# Parallel runs keep one worker process per core, so each worker runs the trees' loops on one
+# thread: more threads per worker only compete for the same cores (with every core busy,
+# three quantile fits took 1.2 s on one thread and 93 s on ten).
+THREADS = "OMP_NUM_THREADS"
+
+
+@contextmanager
+def worker_pool(workers: int) -> Iterator[ProcessPoolExecutor]:
+    """A process pool whose workers start with one thread for the tree models' loops."""
+    before = os.environ.get(THREADS)
+    os.environ[THREADS] = "1"  # each worker reads it when it starts
+    try:
+        with ProcessPoolExecutor(max_workers=workers) as pool:
+            yield pool
+    finally:
+        if before is None:
+            os.environ.pop(THREADS, None)
+        else:
+            os.environ[THREADS] = before
 
 
 @dataclass

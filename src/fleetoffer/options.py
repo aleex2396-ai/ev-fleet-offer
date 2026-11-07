@@ -11,7 +11,7 @@ base set, and the fallback. Nothing from September 2019 onward is read.
 
 from __future__ import annotations
 
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import as_completed
 from pathlib import Path
 
 import pandas as pd
@@ -21,6 +21,7 @@ from fleetoffer.daylevel import DeliveryCalibrated, MakeOffer
 from fleetoffer.devchecks import SELECTION_START, make_arm, selection_days
 from fleetoffer.engine import fleet_replay, training_base_set
 from fleetoffer.offer import CAP_KW, BaseSet, solve, solve_segment
+from fleetoffer.quantiles import worker_pool
 
 FORMS = ("fixed", "average", "segment")  # base set fixed from training, day-average, fallback
 MODELS = {"4": "learned", "5": "population", "6": "stratified"}
@@ -102,7 +103,7 @@ def run_saved(fn, jobs: list[tuple], workers: int, store: Path | None = None) ->
             done[job] = pd.read_pickle(path(job))
         else:
             todo.append(job)
-    with ProcessPoolExecutor(max_workers=workers) as pool:
+    with worker_pool(workers) as pool:
         futures = {pool.submit(fn, *job): job for job in todo}
         for future in as_completed(futures):
             job = futures[future]

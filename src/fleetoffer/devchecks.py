@@ -13,7 +13,6 @@ cars present at the decision time, and of those with energy remaining, are kept.
 
 from __future__ import annotations
 
-from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 import numpy as np
@@ -32,7 +31,7 @@ from fleetoffer.engine import (
 )
 from fleetoffer.interface import DayView, FleetRule
 from fleetoffer.offer import CAP_KW, BaseSet
-from fleetoffer.quantiles import GBDT, PerCarRule
+from fleetoffer.quantiles import GBDT, PerCarRule, worker_pool
 from fleetoffer.resample import paired_interval, week_of
 
 LOCAL_TZ = "America/Los_Angeles"
@@ -268,7 +267,7 @@ def run_arm(data_root: str, name: str) -> dict:
 
 
 def run_arms(data_root: Path, workers: int = 9) -> list[dict]:
-    with ProcessPoolExecutor(max_workers=workers) as pool:
+    with worker_pool(workers) as pool:
         return list(pool.map(run_arm, [str(data_root)] * len(ARMS), ARMS))
 
 

@@ -361,3 +361,15 @@ class _OneColumn:
     def __call__(self, frame):
         code = frame["station"].map({"a": 0, "b": 1, "c": 2}).to_numpy(float)
         return np.column_stack([frame["elapsed_h"].to_numpy(float), code])
+
+
+def test_the_worker_pool_starts_its_workers_on_one_thread_and_restores_the_setting(monkeypatch):
+    import os
+
+    from fleetoffer import quantiles
+
+    monkeypatch.setenv(quantiles.THREADS, "7")
+    with quantiles.worker_pool(2) as pool:
+        seen = [pool.submit(os.getenv, quantiles.THREADS).result() for _ in range(2)]
+    assert seen == ["1", "1"]
+    assert os.environ[quantiles.THREADS] == "7"

@@ -592,6 +592,7 @@ def run_levels(data_root: Path, out: Path, workers: int = 10) -> dict:
     out = Path(out)
     out.mkdir(parents=True, exist_ok=True)
     start = datetime.now(UTC)
+    os.environ[quantiles.FIT_STORE] = str(out / "fits")  # this run's own store of tree fits
     runs = levels.run_all(data_root, workers=workers, store=out / "runs")
     sweep = pd.concat([r["sweep"] for r in runs if "sweep" in r], ignore_index=True)
     oracle = pd.concat(
