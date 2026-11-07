@@ -12,6 +12,7 @@ import matplotlib.dates as mdates  # noqa: E402
 import matplotlib.patheffects as pe  # noqa: E402
 import matplotlib.pyplot as plt  # noqa: E402
 import pandas as pd  # noqa: E402
+from matplotlib.lines import Line2D  # noqa: E402
 
 # Categorical colours in a fixed order, validated for colour-blind separation as a set of
 # three. Colour follows the order the caller lists the rules in, so a rule keeps its colour
@@ -151,14 +152,16 @@ def _quiet_axes(ax) -> None:
     ax.tick_params(colors=INK_2, labelsize=8, length=3)
 
 
-def _finish(fig, path: Path, title: str, note: str | None, right: float = 0.97) -> Path:
+def _finish(
+    fig, path: Path, title: str, note: str | None, right: float = 0.97, top: float = 0.95
+) -> Path:
     fig.suptitle(title, x=0.01, ha="left", fontsize=11, color=INK)
     bottom_margin = 0.0
     if note:
         wrapped = textwrap.fill(note, width=120)
         fig.text(0.01, 0.01, wrapped, fontsize=7.5, color=INK_2, ha="left", va="bottom")
         bottom_margin = 0.025 * (wrapped.count("\n") + 1) + 0.01
-    fig.tight_layout(rect=(0, bottom_margin, right, 0.95))
+    fig.tight_layout(rect=(0, bottom_margin, right, top))
     path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(path, facecolor=SURFACE)
     plt.close(fig)
@@ -277,12 +280,13 @@ def plot_frontier(
             )
         if oracle and name in oracle:
             ax.axhline(oracle[name], color=INK_2, lw=0.8, ls=":")
-            ax.annotate(
+            ax.annotate(  # at the right, clear of the levels never delivered at the left
                 f"perfect knowledge {oracle[name]:.1f} kWh",
-                xy=(0.0, oracle[name]),
+                xy=(1.0, oracle[name]),
                 xycoords=("axes fraction", "data"),
-                xytext=(2, 3),
+                xytext=(-2, 3),
                 textcoords="offset points",
+                ha="right",
                 color=INK_2,
                 fontsize=7,
             )
@@ -297,8 +301,27 @@ def plot_frontier(
         ax.set_yticks([0, 1, 10, 100], ["0", "1", "10", "100"])
         _quiet_axes(ax)
     axes[0].set_ylabel("offer size (kWh, mean)", color=INK_2, fontsize=9)
-    axes[0].legend(loc="upper right", frameon=False, fontsize=7.5, labelcolor=INK_2)
-    return _finish(fig, path, title, note)
+    # one key above the panels: colour for the model, line style for the diagnostic
+    handles = [
+        Line2D([], [], color=SERIES[colour], lw=1.4, label=label)
+        for model, (label, colour, _) in models.items()
+        if not model.endswith("k")
+    ]
+    if any(model.endswith("k") for model in models):
+        handles += [
+            Line2D([], [], color=INK_2, lw=1.4, ls="-", label="all cars"),
+            Line2D([], [], color=INK_2, lw=1.4, ls="--", label="empty cars known"),
+        ]
+    fig.legend(
+        handles=handles,
+        loc="upper center",
+        bbox_to_anchor=(0.5, 0.925),
+        ncol=len(handles),
+        frameon=False,
+        fontsize=7.5,
+        labelcolor=INK_2,
+    )
+    return _finish(fig, path, title, note, top=0.88)
 
 
 def plot_failures(
@@ -330,6 +353,18 @@ def plot_failures(
     return _finish(fig, path, title, note)
 
 
+def _merge_levels(reached: dict[str, float], ratio: float = 1.25) -> list[tuple[float, list]]:
+    """The marked levels in increasing order, with levels within `ratio` of the first of a
+    group drawn as one line carrying all their names, so close labels do not overprint."""
+    groups: list[tuple[float, list]] = []
+    for name, level in sorted(reached.items(), key=lambda item: item[1]):
+        if groups and level <= groups[-1][0] * ratio:
+            groups[-1][1].append(name)
+        else:
+            groups.append((level, [name]))
+    return groups
+
+
 def plot_zero_ceilings(
     table: pd.DataFrame,
     path: Path,
@@ -354,7 +389,7 @@ def plot_zero_ceilings(
         ("zero_stay_share", "deadline zero (leaves within 15 minutes), among all cars"),
     )
     for ax, (column, label) in zip(axes, panels, strict=True):
-        for model, (name, colour) in models.items():
+        for model, (_name, colour) in models.items():
             for suffix, style in (("", "-"), ("k", "--")):
                 curve = rows[rows["model"] == model + suffix].sort_values("level")
                 if curve.empty:
@@ -367,12 +402,11 @@ def plot_zero_ceilings(
                     lw=1.3,
                     marker="o",
                     ms=2.2,
-                    label=name + (", empty cars known" if suffix else ""),
                 )
-        for reach_label, level in (reached or {}).items():
+        for level, names in _merge_levels(reached or {}):
             ax.axvline(100 * level, color=INK_2, lw=0.6, ls=":")
             ax.annotate(
-                reach_label,
+                ", ".join(names),
                 xy=(100 * level, 1.0),
                 xycoords=("data", "axes fraction"),
                 xytext=(2, -2),
@@ -381,6 +415,7 @@ def plot_zero_ceilings(
                 va="top",
                 fontsize=6.5,
                 color=INK_2,
+                bbox={"boxstyle": "square,pad=0.1", "fc": SURFACE, "ec": "none", "alpha": 0.85},
             )
         ax.set_xscale("log")
         ticks = [0.2, 0.5, 1, 2, 5, 10, 20, 50, 95]
@@ -391,5 +426,20 @@ def plot_zero_ceilings(
         ax.set_ylim(-2, 102)
         _quiet_axes(ax)
     axes[0].set_ylabel("share of cars (%)", color=INK_2, fontsize=9)
-    axes[1].legend(loc="upper right", frameon=False, fontsize=7, labelcolor=INK_2)
+    # colour for the model, line style for the diagnostic; placed where the right panel is
+    # empty (above 5%, every deadline is positive)
+    handles = [
+        Line2D([], [], color=SERIES[colour], lw=1.3, label=name) for name, colour in models.values()
+    ] + [
+        Line2D([], [], color=INK_2, lw=1.3, ls="-", label="all cars"),
+        Line2D([], [], color=INK_2, lw=1.3, ls="--", label="empty cars known"),
+    ]
+    axes[1].legend(
+        handles=handles,
+        loc="center right",
+        bbox_to_anchor=(1.0, 0.55),
+        frameon=False,
+        fontsize=7,
+        labelcolor=INK_2,
+    )
     return _finish(fig, path, title, note)
