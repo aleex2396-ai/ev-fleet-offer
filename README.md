@@ -12,6 +12,15 @@ The result is one of three sentences, each worth reporting: per-car learning off
 
 In development. The checks, settings and per-car scores so far use Caltech data before September 2019 only (`docs/data.md`, `docs/theory.md`, `docs/registration.md`); the runs fixed by the tag have started, and no evaluation result is published here yet. The analysis plan (`docs/analysis-plan.md`: decision, offers, models, hypotheses with pass and fail criteria, the checks to run on development data, and the list of earlier looks at the data) is frozen by the git tag `analysis-plan` before any confirmatory run and before any sealed data are opened. "Pre-registered" below means fixed in that document before the tag.
 
+## Development results (May to August 2019)
+
+Every setting was chosen on these months, so their numbers describe the method; they are not a test. Means over the 85 scored weekdays, offers on the day-average base set (`uv run fleetoffer levels`, then `uv run fleetoffer accounting`; the analyses after the first fleet run are listed in `docs/registration.md`).
+
+- With perfect knowledge the offer reaches 42% of the exact band width (39.4 of 93.7 kWh).
+- Under this formulation (one common level, a template, fixed allocation) the offer made from forecasts keeps about 4% of the perfect-knowledge offer (1.55 of 39.4 kWh, population model calibrated on delivery, delivered on 88% of days). The registered rule gives the learned offer zero on every scored weekday.
+- At the shared level each registered day-level rule reaches (median 0.3% for the learned model, 0.9% for the stratified table, 2.8% for the population model), most cars get an energy ceiling of zero: every car that took energy under the learned and stratified models, about three in four under the population model. A lower bound at level q is zero exactly when the car's chance of taking nothing more is at least q (`docs/theory.md`), and 16.4% of car-days at 10:00 take nothing more.
+- Knowing which cars take nothing does not restore the offer: delivered on 90% of days under the fixed allocation, it keeps 0% to 1.9% of the perfect-knowledge offer. The same offers delivered by a split among the cars chosen with hindsight keep 21% to 56% at 90% delivery, an upper bound rather than a method. This is consistent with the allocation fixed at 10:00, more than the cars that take nothing, being where the offer is lost.
+
 ## Design
 
 - **The decision.** At 10:00 on each weekday, for the cars plugged in at that moment, a set of fleet charging profiles for 10:00–20:00 in 15-minute steps. Nothing after 10:00 is used; no arrivals are forecast.
@@ -86,10 +95,10 @@ src/fleetoffer/
   checks.py       the look-ahead scramble test, per car and per day
   synthetic.py    made-up fleets with known flexibility sets
   figures.py      figures, each drawn from a table also written to disk
-  note.py         the note on the results: every number read from the tables, printed to PDF
+  note.py         the note on the results: every result read from the tables, printed to PDF
   pipeline.py     end-to-end runs with manifests
 tests/            unit tests, including the look-ahead tests (no network needed)
-note/             the note's page, with a named field for each number (`fleetoffer note`)
+note/             the note's page, with a named field for each result (`fleetoffer note`)
 fingerprints/     SHA-256 of every downloaded month
 docs/             analysis plan, what the tag fixes (registration), data notes, theory with theorem
                   statements, earlier looks, written predictions, discovery log
