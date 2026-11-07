@@ -889,9 +889,10 @@ def figure_frontier(panels, path, models, form, oracle, monthly, monthly_arms) -
 
 def _fmt(x, digits=2) -> str:
     try:
-        return f"{float(x):.{digits}f}"
+        value = float(x)
     except (TypeError, ValueError):
-        return str(x)
+        return "–" if x is None else str(x)
+    return "–" if value != value else f"{value:.{digits}f}"  # NaN as a dash
 
 
 def results_table(hyp: dict) -> str:
@@ -900,13 +901,14 @@ def results_table(hyp: dict) -> str:
     ev, se = hyp["evaluation"], hyp["sealed"]
     for key, design in (("h1_registered", "registered"), ("h1_secondary", "on delivery")):
         c = ev.get(key, {}).get("one_week", {})
-        rel = c.get("relative", {})
+        rel, kwh = c.get("relative", {}), c.get("absolute_kwh", {})
         lines.append(
             f"| H1, learned against population, Sep 2019 to Feb 2020 | {design} | "
             f"{c.get('reading', '')} | {_fmt(c.get('mean_a_kwh'))} against "
             f"{_fmt(c.get('mean_b_kwh'))} kWh; delivered {_fmt(c.get('delivered_a'))} and "
             f"{_fmt(c.get('delivered_b'))}; relative {_fmt(rel.get('estimate'))} "
-            f"[{_fmt(rel.get('low'))}, {_fmt(rel.get('high'))}] |"
+            f"[{_fmt(rel.get('low'))}, {_fmt(rel.get('high'))}]; difference "
+            f"{_fmt(kwh.get('estimate'))} kWh [{_fmt(kwh.get('low'))}, {_fmt(kwh.get('high'))}] |"
         )
     h2 = ev.get("h2", {})
     lines.append(

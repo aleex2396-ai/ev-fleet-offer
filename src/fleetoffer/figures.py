@@ -130,6 +130,15 @@ def _label_line_ends(fig, ax, items) -> None:
         )
 
 
+def _month_axis(ax, x, fmt: str = "%b %Y") -> None:
+    """Month ticks at a spacing that gives at most eight labels, never two in one month."""
+    x = pd.to_datetime(pd.Series(x))
+    first, last = (x.min(), x.max()) if not x.empty else (None, None)
+    months = 1 if first is None else (last.year - first.year) * 12 + last.month - first.month + 1
+    ax.xaxis.set_major_locator(mdates.MonthLocator(interval=max(1, -(-months // 8))))
+    ax.xaxis.set_major_formatter(mdates.DateFormatter(fmt))
+
+
 def _quiet_axes(ax) -> None:
     ax.set_facecolor(SURFACE)
     ax.yaxis.grid(True, color=GRID, lw=0.6)
@@ -172,6 +181,7 @@ def plot_offers_monthly(
         2, 1, figsize=(8.0, 5.8), dpi=150, sharex=True, gridspec_kw={"height_ratios": [2, 3]}
     )
     fig.patch.set_facecolor(SURFACE)
+    shown: list = []
     for arm, (label, colour, style) in arms.items():
         m = monthly[monthly["arm"] == arm].sort_values("month")
         if m.empty:
@@ -180,6 +190,7 @@ def plot_offers_monthly(
         line = {"color": SERIES[colour], "ls": style, "lw": 1.5, "marker": "o", "ms": 2.5}
         top.plot(x, 100 * m["fixed_delivered"], label=label, **line)
         bottom.plot(x, m["size_mean_kwh"], label=label, **line)
+        shown.extend(x)
     top.axhline(100 * target, color=INK_2, lw=0.9, zorder=1)
     top.set_ylabel("days delivered (%)", color=INK_2, fontsize=9)
     top.set_ylim(0, 102)
@@ -187,7 +198,7 @@ def plot_offers_monthly(
     bottom.set_ylim(bottom=0)
     for ax in (top, bottom):
         _quiet_axes(ax)
-    bottom.xaxis.set_major_formatter(mdates.DateFormatter("%b %Y"))
+    _month_axis(bottom, shown)
     bottom.legend(loc="upper left", frameon=False, fontsize=7.5, labelcolor=INK_2)
     return _finish(fig, path, title, note)
 
@@ -244,7 +255,8 @@ def plot_frontier(
         ax.axhline(100 * target, color=INK_2, lw=0.8)
         ax.set_ylim(0, 102)
         ax.set_title("days delivered by month, 95% week-block interval", fontsize=9, loc="left")
-        ax.xaxis.set_major_formatter(mdates.DateFormatter("%b %y"))
+        months = monthly[monthly["arm"].isin(list(monthly_arms))]["month"]
+        _month_axis(ax, pd.PeriodIndex(months, freq="M").to_timestamp(), "%b %y")
         ax.legend(loc="lower left", frameon=False, fontsize=7, labelcolor=INK_2)
         _quiet_axes(ax)
     for ax, (name, table) in zip(axes, panels.items(), strict=False):
@@ -285,7 +297,7 @@ def plot_frontier(
         ax.set_yticks([0, 1, 10, 100], ["0", "1", "10", "100"])
         _quiet_axes(ax)
     axes[0].set_ylabel("offer size (kWh, mean)", color=INK_2, fontsize=9)
-    axes[0].legend(loc="upper left", frameon=False, fontsize=7.5, labelcolor=INK_2)
+    axes[0].legend(loc="upper right", frameon=False, fontsize=7.5, labelcolor=INK_2)
     return _finish(fig, path, title, note)
 
 
