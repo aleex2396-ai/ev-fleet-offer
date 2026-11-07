@@ -156,12 +156,19 @@ def accounting_html(frame: pd.DataFrame, form: str) -> str:
             text = cell(first) if step == "perfect knowledge" else f"{first['size_mean_kwh']:.2f}"
             out.append(f'<tr><td>{label}</td><td colspan="3">{text}</td></tr>')
             continue
-        cells = {}
+        # the registered rule (4, 5, 6) and the rule calibrated on delivery (4d, 5d, 6d) can
+        # both appear for one form: one row each, so neither overwrites the other
+        groups: dict[str, dict[str, str]] = {}
         for _, r in mine.iterrows():
-            cells[ACCOUNTING_WHO.get(str(r["who"]), str(r["who"]))] = cell(r)
-        out.append(
-            f"<tr><td>{label}</td>"
-            + "".join(f"<td>{cells.get(m, '–')}</td>" for m in MODELS)
-            + "</tr>"
-        )
+            who = str(r["who"])
+            kind = " (calibrated on delivery)" if who.endswith("d") else ""
+            groups.setdefault(kind, {})[ACCOUNTING_WHO.get(who, who)] = cell(r)
+        if len(groups) > 1 and "" in groups:
+            groups[" (registered rule)"] = groups.pop("")
+        for kind, cells in sorted(groups.items()):
+            out.append(
+                f"<tr><td>{label}{kind}</td>"
+                + "".join(f"<td>{cells.get(m, '–')}</td>" for m in MODELS)
+                + "</tr>"
+            )
     return "\n".join(out)

@@ -768,21 +768,26 @@ def run_report(results: Path, out: Path, *, rehearsal: bool = False) -> dict:
         figure_offers(jpl, out / "figure2-jpl.png", FIGURE_TWO_ARMS, "JPL, track 1", note2)
     )
 
-    # Figure 3: the level sweep, frozen evaluation against 2021.
+    # Figure 3: the level sweep, frozen evaluation against the reopening year (2021; the
+    # rehearsal's stand-in year on development data).
+    reopened = evaluation.WINDOWS[f"{prefix}sealed"].reopening_year
+    late = str(reopened)
+    frozen = "rehearsal months" if rehearsal else "September 2019 to February 2020"
     sweep_sealed = _read(sealed, "sweep.csv.gz")
     year = sweep_sealed["decision_time"].dt.tz_convert(LOCAL_TZ).dt.year
     panels = {
-        "September 2019 to February 2020": _read(folders["evaluation"], "sweep_table.csv"),
-        "2021": levels.table(sweep_sealed[year == 2021], None),
+        frozen: _read(folders["evaluation"], "sweep_table.csv"),
+        late: levels.table(sweep_sealed[year == reopened], None),
         "JPL, track 1": _read(folders["jpl"], "sweep_table.csv"),
     }
     sealed_days = _read(sealed, "days.csv.gz")
-    in_2021 = sealed_days["decision_time"].dt.tz_convert(LOCAL_TZ).dt.year == 2021
+    in_late = sealed_days["decision_time"].dt.tz_convert(LOCAL_TZ).dt.year == reopened
     days_by_panel = {
-        "September 2019 to February 2020": evaluation.scored_days(
-            _read(folders["evaluation"], "days.csv.gz"), evaluation.OFFERS_FROM["evaluation"]
+        frozen: evaluation.scored_days(
+            _read(folders["evaluation"], "days.csv.gz"),
+            evaluation.OFFERS_FROM[f"{prefix}evaluation"],
         ),
-        "2021": evaluation.scored_days(sealed_days[in_2021]),
+        late: evaluation.scored_days(sealed_days[in_late]),
         "JPL, track 1": evaluation.scored_days(_read(folders["jpl"], "days.csv.gz")),
     }
     for form, oracle_arm, arms in (
@@ -830,8 +835,8 @@ def run_report(results: Path, out: Path, *, rehearsal: bool = False) -> dict:
         for p in ("evaluation", "sealed", "jpl")
     ]
     accounts.append(
-        evaluation.accounting(evaluation.arm_summary(days_by_panel["2021"]), panels["2021"]).assign(
-            period="sealed, 2021 only"
+        evaluation.accounting(evaluation.arm_summary(days_by_panel[late]), panels[late]).assign(
+            period=f"sealed, {late} only"
         )
     )
     accounts = pd.concat(accounts, ignore_index=True)

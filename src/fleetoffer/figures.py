@@ -177,8 +177,9 @@ def plot_offers_monthly(
         if m.empty:
             continue
         x = pd.PeriodIndex(m["month"], freq="M").to_timestamp() + pd.Timedelta(days=14)
-        top.plot(x, 100 * m["fixed_delivered"], color=SERIES[colour], ls=style, lw=1.5, label=label)
-        bottom.plot(x, m["size_mean_kwh"], color=SERIES[colour], ls=style, lw=1.5, label=label)
+        line = {"color": SERIES[colour], "ls": style, "lw": 1.5, "marker": "o", "ms": 2.5}
+        top.plot(x, 100 * m["fixed_delivered"], label=label, **line)
+        bottom.plot(x, m["size_mean_kwh"], label=label, **line)
     top.axhline(100 * target, color=INK_2, lw=0.9, zorder=1)
     top.set_ylabel("days delivered (%)", color=INK_2, fontsize=9)
     top.set_ylim(0, 102)
@@ -222,7 +223,15 @@ def plot_frontier(
             if m.empty:
                 continue
             x = pd.PeriodIndex(m["month"], freq="M").to_timestamp() + pd.Timedelta(days=14)
-            ax.plot(x, 100 * m["fixed_delivered"], color=SERIES[colour], ls=style, lw=1.3)
+            ax.plot(
+                x,
+                100 * m["fixed_delivered"],
+                color=SERIES[colour],
+                ls=style,
+                lw=1.3,
+                marker="o",
+                ms=2.5,
+            )
             ax.fill_between(
                 x,
                 100 * m["fixed_delivered_low"],
@@ -269,7 +278,11 @@ def plot_frontier(
         ax.set_title(name, fontsize=9, color=INK, loc="left")
         ax.set_xlabel("days delivered (%)", color=INK_2, fontsize=9)
         ax.set_xlim(right=101)
+        # Linear below 1 kWh, logarithmic above: the large offers of high levels, never
+        # delivered, would otherwise flatten the region near the delivery target.
+        ax.set_yscale("symlog", linthresh=1.0, linscale=0.5)
         ax.set_ylim(bottom=0)
+        ax.set_yticks([0, 1, 10, 100], ["0", "1", "10", "100"])
         _quiet_axes(ax)
     axes[0].set_ylabel("offer size (kWh, mean)", color=INK_2, fontsize=9)
     axes[0].legend(loc="upper left", frameon=False, fontsize=7.5, labelcolor=INK_2)
