@@ -530,12 +530,12 @@ def reopening(days: pd.DataFrame, year: int = 2021, window: int = 10, cars: floa
     """The reopening date (analysis plan, Section 7): the first weekday of `year` on which the
     running average of cars present at 10:00 over the last `window` weekdays, that day included,
     is at least `cars`, applied in time order (each day's average uses that day and earlier
-    weekdays only)."""
+    weekdays only; the window may reach back into the year before). `days` holds one row per
+    weekday, days with no car included."""
     local = days["decision_time"].dt.tz_convert(LOCAL_TZ)
     rows = days.assign(local=local).sort_values("decision_time")
-    rows = rows[rows["local"].dt.year == year]
     average = rows["cars"].astype(float).rolling(window, min_periods=window).mean()
-    hit = rows[average >= cars]
+    hit = rows[(average >= cars) & (rows["local"].dt.year == year)]
     if hit.empty:
         return ""
     return str(hit["local"].iloc[0].date())

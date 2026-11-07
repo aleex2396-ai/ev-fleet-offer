@@ -97,6 +97,16 @@ def test_the_reopening_is_the_first_2021_weekday_whose_ten_day_average_reaches_f
     assert evaluation.reopening(weekdays("2021-01-01", 30, [3] * 30)) == ""
 
 
+def test_the_reopening_window_reaches_back_into_the_year_before():
+    # ten busy weekdays at the end of 2020: the first weekday of 2021 already qualifies
+    days = weekdays("2020-12-17", 12, [10] * 12)
+    first_2021 = days["decision_time"].dt.tz_convert(LOCAL_TZ)
+    first_2021 = first_2021[first_2021.dt.year == 2021].iloc[0].date()
+    assert evaluation.reopening(days) == str(first_2021)
+    # a day of 2020 never counts as the reopening, however busy
+    assert evaluation.reopening(weekdays("2020-12-01", 30, [10] * 30)) == "2021-01-01"
+
+
 def h3_days(adaptive, frozen):
     n = len(adaptive)
     base = weekdays("2021-03-01", n, [20] * n).assign(
