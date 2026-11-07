@@ -918,14 +918,17 @@ def results_table(hyp: dict) -> str:
     )
     for pair, design in (("4 against 4f", "registered"), ("4d against 4df", "on delivery")):
         h3 = se.get("h3", {}).get(pair, {})
+        # read from the stored numbers, so a run's too-few-days case is not shown as a failure
+        a, b = evaluation.h3_readings(h3) if "reopening" in h3 else (h3.get("reading", ""),) * 2
         lines.append(
             f"| H3a, frozen offer after the reopening ({se.get('reopening', '')}) | {design} | "
-            f"{h3.get('h3a', h3.get('reading', ''))} | first 20 scored weekdays delivered "
+            f"{a} | first 20 scored weekdays delivered "
             f"{_fmt(h3.get('frozen_first20_delivered'))} |"
         )
         lines.append(
-            f"| H3b, adaptive recovery | {design} | {h3.get('h3b', '')} | 90% over 20 reached "
-            f"at scored weekday {h3.get('adaptive_reached_at_scored_weekday')} |"
+            f"| H3b, adaptive recovery | {design} | {b} | 90% over 20 reached at scored "
+            f"weekday {_fmt(h3.get('adaptive_reached_at_scored_weekday'))}; "
+            f"{h3.get('adaptive_scored_weekdays', '–')} scored weekdays |"
         )
     h4 = ev.get("h4", {})
     lines.append(

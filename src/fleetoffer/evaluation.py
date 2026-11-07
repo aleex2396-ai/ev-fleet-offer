@@ -553,14 +553,37 @@ def h3(days: pd.DataFrame, start: str, arm: str, frozen_arm: str) -> dict:
     frozen = scored_days(days[days["arm"] == frozen_arm], since).sort_values("decision_time")
     first20 = frozen["fixed_delivered"].astype(float).head(20)
     out["frozen_first20_delivered"] = float(first20.mean()) if len(first20) == 20 else np.nan
-    out["h3a"] = "pass" if len(first20) == 20 and first20.mean() < 0.80 else "fail"
+    out["frozen_scored_weekdays"] = len(frozen)
     delivered = adaptive["fixed_delivered"].astype(float).to_numpy()
     running = pd.Series(delivered).rolling(20, min_periods=20).mean().to_numpy()
     reached = np.flatnonzero(running >= 0.90 - 1e-12)
     out["adaptive_reached_at_scored_weekday"] = int(reached[0] + 1) if len(reached) else None
-    out["h3b"] = "pass" if len(reached) and reached[0] + 1 <= 40 else "fail"
     out["adaptive_scored_weekdays"] = len(delivered)
+    out["h3a"], out["h3b"] = h3_readings(out)
     return out
+
+
+def h3_readings(h3: dict) -> tuple[str, str]:
+    """The readings of H3's two clauses from its numbers (`h3`). Each clause needs 20 scored
+    weekdays from the reopening; with fewer it is not testable, not failed. The second clause
+    allows 40 scored weekdays, so while it is not reached with fewer than 40 it is unresolved."""
+    n = h3.get("adaptive_scored_weekdays")
+    frozen_n = h3.get("frozen_scored_weekdays", n)
+    first20 = h3.get("frozen_first20_delivered")
+    if first20 is None or pd.isna(first20):
+        a = f"not testable: {frozen_n} scored weekdays from the reopening, 20 needed"
+    else:
+        a = "pass" if first20 < 0.80 else "fail"
+    at = h3.get("adaptive_reached_at_scored_weekday")
+    if n is not None and n < 20:
+        b = f"not testable: {n} scored weekdays from the reopening, 20 needed"
+    elif at is not None and not pd.isna(at):
+        b = "pass" if at <= 40 else "fail"
+    elif n is not None and n < 40:
+        b = f"not resolved: not reached in {n} scored weekdays, 40 allowed"
+    else:
+        b = "fail"
+    return a, b
 
 
 def h4(

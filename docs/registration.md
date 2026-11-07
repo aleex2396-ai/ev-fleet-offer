@@ -159,3 +159,12 @@ present at 10:00 on a weekday through April 2019; energy limit 5.774 kWh:
 | 3.409 | 3.237 | 2.988 | 2.742 | 2.423 | 2.074 | 1.716 | 1.423 |
 | 18:00 | 18:15 | 18:30 | 18:45 | 19:00 | 19:15 | 19:30 | 19:45 |
 | 1.136 | 0.907 | 0.727 | 0.605 | 0.477 | 0.391 | 0.319 | 0.268 |
+
+## Changes after the tag
+
+Each change below was made after the `analysis-plan` tag; the runs themselves are those of the
+tagged commit, and every original reading stays beside the corrected one.
+
+| Change | What and why | Where |
+|---|---|---|
+| H3 when the days are too few | The tagged code labels each clause of H3 "fail" when fewer than 20 scored weekdays follow the reopening, though a clause that needs 20 weekdays cannot be read on fewer. On the sealed months the reopening rule gives 2 August 2021 and the data end on 13 September 2021: 31 weekdays, 15 of them scored. Both clauses are reported as not testable, with these counts; the runs' stored "fail" labels are kept, and the report reads the clauses again from the stored numbers. No window is moved and no test is added | `evaluation.h3_readings`; `results_table` |

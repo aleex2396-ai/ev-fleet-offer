@@ -131,6 +131,20 @@ def test_h3_reads_the_frozen_and_adaptive_arms():
     assert evaluation.h3(h3_days(late, frozen), "2021-03-01", "4", "4f")["h3b"] == "fail"
 
 
+def test_h3_with_too_few_days_is_not_testable_rather_than_failed():
+    short = evaluation.h3(h3_days([True] * 15, [False] * 15), "2021-03-01", "4", "4f")
+    assert short["h3a"].startswith("not testable: 15 scored weekdays")
+    assert short["h3b"].startswith("not testable: 15 scored weekdays")
+    # 30 days: the first clause is read; the second is unresolved until 40 days have passed
+    mid = evaluation.h3(h3_days([False] * 30, [False] * 30), "2021-03-01", "4", "4f")
+    assert mid["h3a"] == "pass"
+    assert mid["h3b"].startswith("not resolved")
+    # a stored run from before this reading (no frozen count, "fail" labels) reads the same
+    stored = {k: v for k, v in short.items() if k != "frozen_scored_weekdays"}
+    stored |= {"h3a": "fail", "h3b": "fail"}
+    assert evaluation.h3_readings(stored) == (short["h3a"], short["h3b"])
+
+
 def test_h1_with_both_arms_at_zero_is_not_testable():
     days = h3_days([True] * 30, [True] * 30).assign(size_kwh=0.0)
     days["arm"] = days["arm"].map({"4": "4", "4f": "5"})
