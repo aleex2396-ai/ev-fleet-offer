@@ -927,7 +927,7 @@ def results_table(hyp: dict) -> str:
         )
         lines.append(
             f"| H3b, adaptive recovery | {design} | {b} | 90% over 20 reached at scored "
-            f"weekday {_fmt(h3.get('adaptive_reached_at_scored_weekday'))}; "
+            f"weekday {_fmt(h3.get('adaptive_reached_at_scored_weekday'), 0)}; "
             f"{h3.get('adaptive_scored_weekdays', '–')} scored weekdays |"
         )
     h4 = ev.get("h4", {})

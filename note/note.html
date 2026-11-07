@@ -4,7 +4,8 @@
 <meta charset="utf-8">
 <title>${title}</title>
 <!-- The note on the results. `uv run fleetoffer note` fills every placeholder below from the
-     result tables and prints the page to PDF; no number in it is typed by hand. -->
+     result tables and prints the page to PDF. Every result is a placeholder; the settings and
+     the numbers of the checks made before the tag, as `docs/` states them, are typed. -->
 <style>
 @page { size: Letter; margin: 0.7in 0.62in 0.8in 0.62in; }
 html { font-family: "Times New Roman", Times, serif; font-size: 10pt; line-height: 1.17; color: #000; background: #fff; }
@@ -27,6 +28,10 @@ h2 + p, h3 + p, .noindent { text-indent: 0; }
 .statement b, .statement i.head { font-style: italic; font-weight: normal; }
 figure { margin: 0.08in 0; break-inside: avoid; }
 figure.wide { column-span: all; }
+div.table.wide { column-span: all; }
+div.table.breakable { break-inside: auto; }
+.tablenote { font-size: 7.5pt; line-height: 1.2; text-indent: 0; margin-top: 0.03in; text-align: justify; }
+table.hypotheses td, table.hypotheses th { text-align: left; }
 figure img { width: 100%; display: block; }
 figcaption { font-size: 8pt; line-height: 1.2; text-align: justify; margin-top: 0.03in; }
 table { border-collapse: collapse; width: 100%; font-size: 8pt; line-height: 1.2; margin: 0.03in 0; }
@@ -49,14 +54,14 @@ ol.refs li::before { content: "[" counter(ref) "]"; position: absolute; left: -2
 
 <div class="columns">
 
-<p class="abstract"><i>Abstract</i>—${abstract}</p>
+<p class="abstract"><i>Abstract</i>—An aggregator can sell the charging flexibility of the cars parked at a workplace only if it delivers what it offers. This note builds the inner-approximation offer of Al Taha, Vincent and Bitar from per-car sets whose deadlines and energy ceilings are lower quantiles forecast at 10:00, sets one quantile level per day from past days to target delivery on 90% of days, and scores the offer by replay on the Caltech and JPL sessions of ACN-Data, with the hypotheses fixed before the test months were opened. With perfect knowledge the offer reaches ${dev_pk_of_band} of the exact band width. Made from forecasts at the delivery target it keeps about ${dev_rule_5d_share0} of the perfect-knowledge offer on the model-selection months and ${ev_rule_5d_share} in the frozen evaluation. A short proposition explains the zero offers: at the small shared level the target needs, a car's energy bound is zero whenever its chance of taking nothing more is at least that level, and ${empty_share} of car-days take nothing more. Knowing those cars in advance does not restore the offer; splitting each profile among the cars with hindsight keeps ${dev_hind_min} to ${dev_hind_max} of it. A learned per-car model keeps ${ev_h4_learned}&#160;h of each car's remaining stay against ${ev_h4_population}&#160;h for a population rule at matched coverage; calibrated on delivery, its fleet offer is ${ev_h1_sec_a} against ${ev_h1_sec_b}&#160;kWh.</p>
 <p class="keywords"><i>Index Terms</i>—Electric vehicles, aggregate flexibility, inner approximation, quantile regression, conformal calibration.</p>
 
 <h2>I. Introduction</h2>
 
 <p>An aggregator that controls the charging of the cars parked at a workplace can offer the grid a set of charging profiles for the rest of the day, and is paid only if it then follows whichever profile is called. The set it can promise depends on the cars plugged in: when each will leave and how much energy each will still take. Both are unknown when the offer is made.</p>
 
-<p>With each car's flexibility known, the fleet's flexibility is the Minkowski sum of the cars' sets. Al Taha, Vincent and Bitar [1] place a shifted, scaled copy of a base set inside that sum by a linear programme whose solution also allocates any profile in the copy to the cars by an affine map; for charging-only cars with one connection interval the exact sum is a generalised polymatroid [2]. Both start from sets that are known. At the time of the offer they are not, and the question this note asks is what is left of the offer when each car's set is built from forecasts made at that time, and the offer must be delivered on 90% of days.</p>
+<p>With each car's flexibility known, the fleet's flexibility is the Minkowski sum of the cars' sets. Al Taha, Vincent and Bitar [1] place a shifted, scaled copy of a base set inside that sum by a linear programme whose solution also allocates any profile in the copy to the cars by an affine map; for charging-only cars with one connection interval the exact sum is a generalised polymatroid [2]. Both start from sets that are known, and [6] certifies an aggregate set for cars drawn independently from one known distribution. At the time of the offer the sets are not known, and the question this note asks is what is left of the offer when each car's set is built from forecasts made at that time, and the offer must be delivered on 90% of days.</p>
 
 <p>The construction is one-sided: each car's set uses a deadline no later than it is forecast to leave and an energy ceiling no higher than it is forecast to take. On any day on which all these bounds hold, every learned set lies inside the car's true set, so the offer and the allocation fixed in the morning are delivered (Proposition&#160;1). Whether they do hold is decided by one quantile level shared by every car, chosen each morning from past days by adaptive conformal inference [3]. The evaluation replays each day against the cars actually present, in time order, on the Caltech and JPL sessions of ACN-Data [4], with the analyses, thresholds and hypotheses fixed in a tagged commit before the test months were opened.</p>
 
@@ -115,11 +120,54 @@ ol.refs li::before { content: "[" counter(ref) "]"; position: absolute; left: -2
 
 <h2>V. Results</h2>
 
-${results}
+<h3>A. Where the offer goes</h3>
+
+<p>Table&#160;I follows the offer made with perfect knowledge of every car's set through each loss, on the day-average base set. Each entry is read at its own delivery rate, and the rows marked “90% of days” use, for each model, the largest swept level delivered on 90% of scored weekdays, a level chosen with hindsight. With perfect knowledge the offer reaches ${dev_pk_of_band} of the exact band width on the model-selection months (${dev_pk} of ${dev_band}&#160;kWh), and ${ev_pk_of_band}, ${se_pk_of_band} and ${jpl_pk_of_band} in the frozen evaluation, the sealed months and at JPL. That is the cost of the sufficient conditions of [1, Thm.&#160;2] with this base set and fixed allocation.</p>
+
+<p>Under this formulation (one common level, a template, fixed allocation) the offer made from forecasts keeps about ${dev_rule_5d_share0} of the perfect-knowledge offer (${dev_rule_5d} of ${dev_pk}&#160;kWh): the population model calibrated on delivery, delivered on ${dev_rule_5d_delivered} of days. The learned model calibrated in the same way keeps ${dev_rule_4d_share}, and under the registered rule the learned offer is zero on every scored weekday. With each model's level chosen with hindsight, no model keeps more than ${dev_fc_max} at 90% delivery; Fig.&#160;1 shows every swept level against the days it was delivered. In the frozen evaluation the population rule as run keeps ${ev_rule_5d_share} (delivered on ${ev_rule_5d_delivered} of days), in the sealed months ${se_rule_5d_share} (${se_rule_5d_delivered}) and at JPL ${jpl_rule_5d_share} (${jpl_rule_5d_delivered}).</p>
+
+<p>Two diagnostics locate the loss; neither is a method an operator could run. With the cars that take nothing more known at 10:00 and the models refitted on car-days that took energy, the offer delivered on 90% of days keeps at most ${dev_known_max} (${ev_known_max} in the frozen evaluation, ${se_known_max} in the sealed months). With the same forecasts but each profile split among the cars present with hindsight, it keeps ${dev_hind_min} to ${dev_hind_max} (${ev_hind_min} to ${ev_hind_max}; ${se_hind_min} to ${se_hind_max}). On the one-dimensional offer, the registered form, the best of the three models keeps ${dev_seg_fc_max} at 90% delivery and the hindsight split ${dev_seg_hind_min} to ${dev_seg_hind_max}. Both diagnostics are consistent with the allocation fixed at 10:00, more than the cars that take nothing, being where the offer is lost. Under that allocation each car must follow its own share; a split chosen afterwards lets one car's slack cover another's shortfall. At level 0.15 every bound of the learned model held on ${dev_held_4_015} of scored weekdays and the fixed allocation delivered on ${dev_fixed_4_015}, while the hindsight split delivered on ${dev_hind_4_015}.</p>
+
+<div class="table wide">
+<table>
+<caption>Table I. Where the perfect-knowledge offer goes (day-average base set; L, P, S: learned, population, stratified; shares in percent of the perfect-knowledge offer)</caption>
+${table_accounting}
+</table>
+<p class="tablenote">The exact band is a ceiling no single offer need reach; in brackets beside the perfect-knowledge offer, its share of the band. “90% of days”: the largest swept offer delivered on at least 90% of scored weekdays, level chosen with hindsight. “Empty cars known”: the cars that take nothing after 10:00 are dropped and the models refitted on car-days that took energy. “Hindsight split”: delivery checked with the split of each profile chosen with hindsight among the cars present, an upper bound. “Level from past days”: the rule calibrated on delivery, as run. At JPL the sweep is run on the one-dimensional offer only.</p>
+</div>
+
+<figure class="wide">
+<img src="figure3-average.png" alt="Mean offer size against the share of scored weekdays delivered, at every shared level">
+<figcaption>Fig. 1. Mean offer size against the share of scored weekdays delivered under the allocation fixed at 10:00, one point per shared level, day-average base set; dotted, the perfect-knowledge offer; vertical line, 90% of days. Right: days delivered by month for the rules calibrated on delivery, with 95% intervals from resampling whole weeks.</figcaption>
+</figure>
+
+<h3>B. Zero ceilings</h3>
+
+<p>Fig.&#160;2 is the check of Proposition&#160;2 on the model-selection months; its three readings were registered before the counts were read. At the level each registered rule reached (median ${dev_level_4} for the learned model, ${dev_level_6} for the stratified table, ${dev_level_5} for the population model), the share of cars that took energy but were given a zero energy ceiling is ${dev_zc_4}, ${dev_zc_6} and ${dev_zc_5}. The share never rises with the level in any model or offer form (the second reading ${dev_zc_falls}), and with the empty cars known it is at most ${dev_zc_known_max} at any level. In the frozen evaluation the shares at the rules' levels are ${ev_zc_4}, ${ev_zc_6} and ${ev_zc_5}, in the sealed months ${se_zc_4}, ${se_zc_6} and ${se_zc_5}. The proposition accounts for the zero offers. Table&#160;I shows that removing the atom does not restore them: once the empty cars are known, the bounds are positive but miss more often than their level. At level ${lowest_level} every bound of the learned model refitted on car-days with energy held on ${dev_held_4k_low} of scored weekdays, against at least ${dev_union_floor} by the union bound if each bound missed with probability ${lowest_level}.</p>
+
+<figure class="wide">
+<img src="zero-ceilings.png" alt="Share of cars given a zero energy ceiling and a zero deadline at each shared level">
+<figcaption>Fig. 2. Share of cars that took energy but were given a zero energy ceiling (left), and of all cars given a zero deadline (right), at each shared level q, May to August 2019. Dashed: the empty cars known. Dotted lines: the median level each registered rule used.</figcaption>
+</figure>
+
+<h3>C. Registered comparisons</h3>
+
+<p>Table&#160;II gives each registered hypothesis with its reading. Under the registered design H1 reads “${ev_h1_reg_reading}” (learned ${ev_h1_reg_a} against population ${ev_h1_reg_b}&#160;kWh over ${ev_h1_reg_days} scored weekdays). Under the design calibrated on delivery it reads “${ev_h1_sec_reading}”: ${ev_h1_sec_a} against ${ev_h1_sec_b}&#160;kWh, delivered on ${ev_h1_sec_da} and ${ev_h1_sec_db} of days, a difference of ${ev_h1_sec_diff}&#160;kWh (95% week-block interval ${ev_h1_sec_lo} to ${ev_h1_sec_hi}). H2, the union-bound offer, reads “${h2_reading}” (delivered on ${h2_delivered} of days, ${h2_size3}&#160;kWh). H3 cannot be tested: the reopening date fixed by the registered rule is ${h3_reopening}, and the record ends ${h3_days} scored weekdays later, while each clause needs 20. H4 reads “${ev_h4_reading}”: at matched 90% coverage the learned bound keeps ${ev_h4_learned}&#160;h of each car's remaining stay against ${ev_h4_population}&#160;h for the population bound (coverage ${ev_h4_learned_cov} and ${ev_h4_population_cov}, ${ev_h4_car_days} car-days), and ${se_h4_learned} against ${se_h4_population}&#160;h in the sealed months. The per-car gain is real and does not reach the fleet offer. At JPL, run once with the Caltech pipeline frozen, the calibrated learned offer is ${jpl_frozen_sec_a}&#160;kWh against ${jpl_frozen_sec_b}&#160;kWh for the population (delivered on ${jpl_frozen_sec_da} and ${jpl_frozen_sec_db} of days); updating on JPL days, ${jpl_updating_sec_a} against ${jpl_updating_sec_b}&#160;kWh (${jpl_updating_sec_da} and ${jpl_updating_sec_db}).</p>
+
+<div class="table wide breakable">
+<table class="hypotheses">
+<caption>Table II. Registered hypotheses (95% intervals from one-week blocks)</caption>
+${table_hypotheses}
+</table>
+</div>
 
 <h2>VI. Discussion</h2>
 
-${discussion}
+<p>None of the guarantees used here bounds the offer's size. Proposition&#160;1 needs every bound to hold, not to be informative; at the levels a 90%-of-days target needs with ${median_cars} cars, most energy bounds are zero (Proposition&#160;2). The adaptive rule's long-run bound on the share of failed days [3, Prop.&#160;4.1], in the one-sided form used here, holds whatever the days do, provided each outcome is known before the next decision; a car that stays overnight delays it. It is met by an offer of zero. The finite-sample bound of [5, Thm.&#160;4] for chance constraints under drift assumes independent days, a known drift bound on whole-day configurations and a finite decision set, and at the two settings computed here it needs ${theorem_days} days; ${days_before_change} weekdays precede the closure, so no certificate from it is claimed.</p>
+
+<p>Reliability was recovered by giving up size. Delivered on 90% of days, the offer made from forecasts keeps a few percent of the offer perfect knowledge supports, and the learned per-car model, whose stay bounds are tighter than the population's at matched coverage (H4), gives the smaller fleet offer once both are calibrated by day. The diagnostics point at the formulation more than at the forecasts: a shared level makes every car's bound as cautious as the fleet's target requires, and the allocation fixed at 10:00 turns any car's miss into the fleet's.</p>
+
+<p>The limits of the evidence are as follows. The energy a car takes after 10:00 is estimated, not measured, and the site's own scheduler shapes it: cars took a median 0.64 of what their drivers asked for. Whether a car is still charging at 10:00, which an operator would see, is not recorded, so the diagnostic in which the empty cars are known stands in for it. The power cap of 6.7&#160;kW is assumed for every station, with 3.3 and 11&#160;kW run as sensitivities. Only nine profiles of each offer are checked. H3 is untested for lack of days after the reopening, and the sealed months held ${se_h1_sec_days} scored weekdays, so their comparisons are wide. The evaluation months and both sealed periods were looked at for stay statistics while the project was scoped; the list is in the repository.</p>
 
 <h2>References</h2>
 <ol class="refs">

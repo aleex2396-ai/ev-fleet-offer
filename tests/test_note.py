@@ -62,3 +62,92 @@ def test_the_accounting_gives_the_registered_and_the_calibrated_rule_a_row_each(
     assert len(rows) == 2
     assert any("calibrated on delivery" in r and "1.50" in r for r in rows)
     assert any("registered rule" in r and "0.00" in r for r in rows)
+
+
+def test_a_level_between_grid_levels_reads_the_upper_one():
+    assert note.grid_level_at_or_above(0.003) == 0.005
+    assert note.grid_level_at_or_above(0.01) == 0.01
+    assert note.grid_level_at_or_above(0.028) == 0.05
+
+
+def _sweep(shares: dict[str, list[float]], levels=(0.0, 0.002, 0.005, 0.01, 0.05)):
+    return pd.concat(
+        pd.DataFrame(
+            {
+                "model": model,
+                "form": "average",
+                "level": list(levels),
+                "zero_ceiling_share_with_energy": share,
+            }
+        )
+        for model, share in shares.items()
+    )
+
+
+def test_zero_ceiling_readings_at_each_rules_level():
+    table = _sweep(
+        {
+            "4": [1.0, 1.0, 0.9, 0.5, 0.1],
+            "5": [1.0, 0.8, 0.8, 0.7, 0.7],
+            "6": [1.0, 1.0, 1.0, 0.6, 0.2],
+            "4k": [1.0, 0.02, 0.01, 0.0, 0.0],
+        }
+    )
+    reached = {"learned rule": 0.003, "population rule": 0.0, "stratified rule": 0.009}
+    r = note.zero_ceilings(table, reached)
+    assert r["at_4"] == 0.9  # read at 0.005, the grid level above 0.003
+    assert r["at_5"] == 1.0  # below the grid every bound is zero
+    assert r["at_6"] == 0.6
+    assert r["falls"] and r["known_max"] == 0.02
+    rising = table.copy()
+    rising.loc[
+        (rising["model"] == "5") & (rising["level"] == 0.05), "zero_ceiling_share_with_energy"
+    ] = 0.75
+    assert not note.zero_ceilings(rising, reached)["falls"]
+
+
+def test_the_accounting_table_has_a_dash_where_a_period_has_no_step():
+    rows = []
+    for period, has_sweep in (
+        ("development", True),
+        ("evaluation", True),
+        ("sealed", True),
+        ("jpl", False),
+    ):
+        rows += [
+            {
+                "period": period,
+                "form": "average",
+                "step": "exact band of the true sets",
+                "who": "1",
+                "size_mean_kwh": 100.0,
+                "share_of_perfect": 2.5,
+                "delivered": np.nan,
+            },
+            {
+                "period": period,
+                "form": "average",
+                "step": "perfect knowledge",
+                "who": "1",
+                "size_mean_kwh": 40.0,
+                "share_of_perfect": 1.0,
+                "delivered": 1.0,
+            },
+        ]
+        if has_sweep:
+            rows += [
+                {
+                    "period": period,
+                    "form": "average",
+                    "step": "forecasts at 90% delivery",
+                    "who": m,
+                    "size_mean_kwh": 0.0,
+                    "share_of_perfect": 0.0,
+                    "delivered": 1.0,
+                }
+                for m in ("4", "5", "6")
+            ]
+    html = note.accounting_table(pd.DataFrame(rows))
+    forecasts = next(line for line in html.splitlines() if "Forecasts" in line)
+    assert forecasts.count("<td>0</td>") == 9 and forecasts.count("<td>–</td>") == 3
+    assert "40.0 (40%)" in html
