@@ -118,3 +118,50 @@ def build(results: Path, out: Path, *, rehearsal: bool = False) -> dict[str, Pat
     page = out / "note.html"
     page.write_text(fill(TEMPLATE.read_text(), numbers))
     return {"html": page, "pdf": print_pdf(page, out / "note.pdf")}
+
+
+ACCOUNTING_ROWS = {
+    "exact band of the true sets": "Exact band of the true sets",
+    "perfect knowledge": "Perfect knowledge",
+    "forecasts at 90% delivery": "Forecasts, delivered on 90% of days",
+    "empty cars known": "The same, empty cars known",
+    "hindsight split at 90%": "The same, split chosen with hindsight",
+    "day-level rule as run": "Level chosen from past days",
+}
+ACCOUNTING_WHO = {"4": "4", "5": "5", "6": "6", "4k": "4", "5k": "5", "6k": "6"}
+ACCOUNTING_WHO |= {"4d": "4", "5d": "5", "6d": "6"}
+
+
+def accounting_html(frame: pd.DataFrame, form: str) -> str:
+    """Table rows of the accounting (`levels.accounting`) for one offer form: each step's mean
+    offer size in kWh, its share of the perfect-knowledge offer, and the delivery rate it was
+    read at, one column per model."""
+
+    def cell(row) -> str:
+        size = f"{row['size_mean_kwh']:.2f}"
+        share = row["share_of_perfect"]
+        rate = row["delivered"]
+        extra = [f"{100 * share:.0f}%"] if pd.notna(share) else []
+        extra += [f"d {100 * rate:.0f}%"] if pd.notna(rate) else []
+        return size + (f" ({', '.join(extra)})" if extra else "")
+
+    rows = frame[frame["form"] == form]
+    out = []
+    for step, label in ACCOUNTING_ROWS.items():
+        mine = rows[rows["step"] == step]
+        if mine.empty:
+            continue
+        if step in ("exact band of the true sets", "perfect knowledge"):
+            first = mine.iloc[0]
+            text = cell(first) if step == "perfect knowledge" else f"{first['size_mean_kwh']:.2f}"
+            out.append(f'<tr><td>{label}</td><td colspan="3">{text}</td></tr>')
+            continue
+        cells = {}
+        for _, r in mine.iterrows():
+            cells[ACCOUNTING_WHO.get(str(r["who"]), str(r["who"]))] = cell(r)
+        out.append(
+            f"<tr><td>{label}</td>"
+            + "".join(f"<td>{cells.get(m, '–')}</td>" for m in MODELS)
+            + "</tr>"
+        )
+    return "\n".join(out)
