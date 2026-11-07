@@ -70,7 +70,9 @@ def test_the_d10_reading_uses_the_tighter_tolerance_at_0005():
     assert not reading.loc[0.005, "within"] and reading.loc[0.01, "within"]
 
 
-def test_months_after_august_2019_need_the_tag(tmp_path):
+def test_months_after_august_2019_need_the_tag(tmp_path, monkeypatch):
+    # the repository's own tag must not decide the test: it exists once the plan is frozen
+    monkeypatch.setattr(percar.data, "plan_is_tagged", lambda: False)
     with pytest.raises(SealedPeriodError):
         percar.load(tmp_path, until=pd.Timestamp("2019-10-01", tz="America/Los_Angeles"))
 
