@@ -58,7 +58,7 @@ here and in `docs/theory.md`.
 | Item | Fixed as | Where |
 |---|---|---|
 | Hypotheses | H1 to H4 with the thresholds of the plan, Section 9 | `docs/analysis-plan.md` |
-| Primary contrast | H1: arm 4 against arm 5, relative difference of mean offer size on the scored weekdays of September 2019 to February 2020, with a paired week-block interval | `resample.paired_interval(relative=True)` |
+| Primary contrast | H1: arm 4 against arm 5, relative difference of mean offer size on the scored weekdays of September 2019 to February 2020, with a paired week-block interval. H1 passes if the relative difference is at least 10% and the interval of the paired difference in kWh lies above zero; that interval is defined in every resample, and wherever the relative difference is defined (arm 5's total above zero) the two have the same sign. The relative interval is reported over the resamples in which it is defined, with their number | `resample.paired_interval`, `evaluation.paired` |
 | H4, matched reliability | Each model's stay bound at the level split conformal gives on its own past car-days (90-day window, miss 10% of car-days), recomputed each day; both achieved coverages reported | `percar.matched` |
 | Confirmatory and descriptive | H1 and H4 confirmatory; H2 and H3 checks; monthly and per-site contrasts descriptive | plan, Section 9 |
 | Uncertainty | Whole local weeks (Monday to Sunday) drawn with replacement, both arms together, 10,000 draws, seed 0, 95% percentile interval; two-week blocks as the sensitivity | `resample.py` |

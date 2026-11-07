@@ -58,16 +58,20 @@ def paired_interval(
     picks = rng.integers(0, len(labels), size=(draws, len(labels)))
     weights = np.zeros((draws, len(labels)))
     np.add.at(weights, (np.repeat(np.arange(draws), len(labels)), picks.ravel()), 1.0)
-    values = statistic(weights)
+    out = {"days": len(days), "blocks": len(labels), "estimate": estimate}
     tail = (1 - level) / 2
+    if relative:
+        # a resample in which b's total is zero has no relative difference; the interval is
+        # taken over the others, and their count is given
+        defined = weights @ sums_b > 0
+        values = statistic(weights[defined])
+        out["draws_defined"] = int(defined.sum())
+    else:
+        values = statistic(weights)
+    if len(values) == 0:
+        return out | {"low": np.nan, "high": np.nan}
     low, high = np.quantile(values, [tail, 1 - tail])
-    return {
-        "days": len(days),
-        "blocks": len(labels),
-        "estimate": estimate,
-        "low": float(low),
-        "high": float(high),
-    }
+    return out | {"low": float(low), "high": float(high)}
 
 
 def rate_interval(

@@ -503,7 +503,9 @@ def paired(days: pd.DataFrame, a: str, b: str, *, weeks: int = 1) -> dict:
             "reading": "not testable on the relative scale: the second arm offers zero",
         }
     relative = paired_interval(both, a, b, weeks=weeks, relative=True)
-    passed = relative["estimate"] >= 0.10 and relative["low"] > 0
+    # the interval that must exclude zero is that of the difference in kWh: it is defined in
+    # every resample, and wherever the relative difference is defined it has the same sign
+    passed = relative["estimate"] >= 0.10 and absolute["low"] > 0
     return out | {
         "relative": relative,
         "absolute_kwh": absolute,

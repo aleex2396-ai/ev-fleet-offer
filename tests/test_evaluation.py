@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from fleetoffer import evaluation
+from fleetoffer import evaluation, resample
 from fleetoffer.baselines import Population
 from fleetoffer.daylevel import Calibrated
 from fleetoffer.engine import fleet_replay
@@ -241,3 +241,17 @@ def test_the_jpl_sweep_with_the_empty_cars_known_trains_and_runs(monkeypatch):
     monkeypatch.setattr(percar, "load", lambda *args, **kwargs: (sessions, entries))
     out = evaluation.run_sweep("d", "rehearsal-jpl", "5k", "segment")
     assert len(out["sweep"]) > 20 and (out["sweep"]["dropped_cars"] >= 0).all()
+
+
+def test_h1_reads_its_interval_on_the_kwh_scale_when_the_second_arm_is_often_zero():
+    n = 40
+    population = [0.0] * n
+    population[3] = 0.5  # one positive day: most resamples of weeks have a zero total
+    days = h3_days([True] * n, [True] * n)
+    days["arm"] = days["arm"].map({"4": "4", "4f": "5"})
+    days.loc[days["arm"] == "4", "size_kwh"] = 2.0
+    days.loc[days["arm"] == "5", "size_kwh"] = population
+    out = evaluation.paired(days, "4", "5")
+    assert 0 < out["relative"]["draws_defined"] < resample.DRAWS
+    assert out["absolute_kwh"]["low"] > 0
+    assert out["reading"] == "pass"
