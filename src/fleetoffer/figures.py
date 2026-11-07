@@ -303,3 +303,68 @@ def plot_failures(
         ax.set_xlim(-2, 102)
         _quiet_axes(ax)
     return _finish(fig, path, title, note)
+
+
+def plot_zero_ceilings(
+    table: pd.DataFrame,
+    path: Path,
+    *,
+    models: dict[str, tuple[str, int]],
+    reached: dict[str, float] | None = None,
+    title: str,
+    note: str | None = None,
+) -> Path:
+    """The check of the zero-ceiling proposition (`docs/theory.md`): at each swept level, the
+    share of cars that did take energy but were given an energy ceiling of zero, and the share
+    of all cars given a deadline of zero, one colour per model; solid with the models as run,
+    dashed with the cars that take nothing known (rows of model `<model>k`). The ceilings do
+    not depend on the offer form, so one form's rows are read. `reached` marks levels the
+    day-level rules reached, as vertical lines."""
+    form = sorted(table["form"].unique())[0]
+    rows = table[(table["form"] == form) & (table["level"] > 0)]
+    fig, axes = plt.subplots(1, 2, figsize=(8.0, 3.4), dpi=150, sharey=True)
+    fig.patch.set_facecolor(SURFACE)
+    panels = (
+        ("zero_ceiling_share_with_energy", "energy ceiling zero, among cars that took energy"),
+        ("zero_stay_share", "deadline zero (leaves within 15 minutes), among all cars"),
+    )
+    for ax, (column, label) in zip(axes, panels, strict=True):
+        for model, (name, colour) in models.items():
+            for suffix, style in (("", "-"), ("k", "--")):
+                curve = rows[rows["model"] == model + suffix].sort_values("level")
+                if curve.empty:
+                    continue
+                ax.plot(
+                    100 * curve["level"],
+                    100 * curve[column],
+                    color=SERIES[colour],
+                    ls=style,
+                    lw=1.3,
+                    marker="o",
+                    ms=2.2,
+                    label=name + (", empty cars known" if suffix else ""),
+                )
+        for reach_label, level in (reached or {}).items():
+            ax.axvline(100 * level, color=INK_2, lw=0.6, ls=":")
+            ax.annotate(
+                reach_label,
+                xy=(100 * level, 1.0),
+                xycoords=("data", "axes fraction"),
+                xytext=(2, -2),
+                textcoords="offset points",
+                rotation=90,
+                va="top",
+                fontsize=6.5,
+                color=INK_2,
+            )
+        ax.set_xscale("log")
+        ticks = [0.2, 0.5, 1, 2, 5, 10, 20, 50, 95]
+        ax.set_xticks(ticks, [f"{t:g}" for t in ticks])
+        ax.minorticks_off()
+        ax.set_xlabel("shared level q (%)", color=INK_2, fontsize=9)
+        ax.set_title(label, fontsize=8.5, color=INK, loc="left")
+        ax.set_ylim(-2, 102)
+        _quiet_axes(ax)
+    axes[0].set_ylabel("share of cars (%)", color=INK_2, fontsize=9)
+    axes[1].legend(loc="upper right", frameon=False, fontsize=7, labelcolor=INK_2)
+    return _finish(fig, path, title, note)

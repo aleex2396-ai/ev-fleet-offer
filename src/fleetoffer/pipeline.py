@@ -1082,6 +1082,11 @@ def main(argv: list[str] | None = None) -> int:
     rep.add_argument("--out", type=Path, default=None)
     rep.add_argument("--rehearsal", action="store_true")
 
+    nt = commands.add_parser("note", help="the note on the results, filled from the tables, as PDF")
+    nt.add_argument("--results", type=Path, default=Path("results"))
+    nt.add_argument("--out", type=Path, default=None)
+    nt.add_argument("--rehearsal", action="store_true")
+
     commands.add_parser(
         "requirements",
         help="days the 2022 drift theorem needs for a 90%%-of-days offer, beside the days held",
@@ -1173,6 +1178,13 @@ def main(argv: list[str] | None = None) -> int:
         out = args.out or args.results / folder
         report = run_report(args.results, out, rehearsal=args.rehearsal)
         print(f"wrote {len(report['figures'])} figures and the results table to {out}")
+    elif args.command == "note":
+        from fleetoffer import note
+
+        folder = "note-rehearsal" if args.rehearsal else "note"
+        out = args.out or args.results / folder
+        built = note.build(args.results, out, rehearsal=args.rehearsal)
+        print(f"wrote {built['html']}" + (f" and {built['pdf']}" if built["pdf"] else ""))
     elif args.command == "requirements":
         print(calibrate.requirements_table().to_string(index=False))
         print()

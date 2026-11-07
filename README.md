@@ -86,8 +86,10 @@ src/fleetoffer/
   checks.py       the look-ahead scramble test, per car and per day
   synthetic.py    made-up fleets with known flexibility sets
   figures.py      figures, each drawn from a table also written to disk
+  note.py         the note on the results: every number read from the tables, printed to PDF
   pipeline.py     end-to-end runs with manifests
 tests/            unit tests, including the look-ahead tests (no network needed)
+note/             the note's page, with a named field for each number (`fleetoffer note`)
 fingerprints/     SHA-256 of every downloaded month
 docs/             analysis plan, what the tag fixes (registration), data notes, theory with theorem
                   statements, earlier looks, written predictions, discovery log
