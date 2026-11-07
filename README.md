@@ -10,7 +10,7 @@ The result is one of three sentences, each worth reporting: per-car learning off
 
 ## Status
 
-In development. The checks, settings and per-car scores so far use Caltech data before September 2019 only (`docs/data.md`, `docs/theory.md`, `docs/registration.md`); no evaluation result has been produced yet. The analysis plan (`docs/analysis-plan.md`: decision, offers, models, hypotheses with pass and fail criteria, the checks to run on development data, and the list of earlier looks at the data) is frozen by the git tag `analysis-plan` before any confirmatory run and before any sealed data are opened. "Pre-registered" below means fixed in that document before the tag.
+In development. The checks, settings and per-car scores so far use Caltech data before September 2019 only (`docs/data.md`, `docs/theory.md`, `docs/registration.md`); the runs fixed by the tag have started, and no evaluation result is published here yet. The analysis plan (`docs/analysis-plan.md`: decision, offers, models, hypotheses with pass and fail criteria, the checks to run on development data, and the list of earlier looks at the data) is frozen by the git tag `analysis-plan` before any confirmatory run and before any sealed data are opened. "Pre-registered" below means fixed in that document before the tag.
 
 ## Design
 
