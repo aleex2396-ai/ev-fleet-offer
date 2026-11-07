@@ -452,6 +452,23 @@ def hypothesis_numbers(hyp: dict, requirements: list[dict], available: list[dict
     return out
 
 
+def offer_days(days: pd.DataFrame, arms: dict[str, str], key: str) -> dict[str, str]:
+    """For each arm (as `{arm: name}`), on the scored weekdays of a run's `days.csv.gz`: how
+    many carry an offer above the registered zero line of 1e-9 kWh, and the largest offer
+    (kWh, two significant figures). Shows what a reading between two near-zero means rests on."""
+    scored = evaluation.scored_days(days)
+    out: dict[str, str] = {}
+    for arm, name in arms.items():
+        size = scored.loc[scored["arm"].astype(str) == arm, "size_kwh"]
+        largest = float(size.max()) if len(size) else float("nan")
+        out[f"{key}_pos_{name}"] = str(int((size > 1e-9).sum()))
+        if pd.isna(largest):
+            out[f"{key}_max_{name}"] = "–"
+        else:
+            out[f"{key}_max_{name}"] = "0" if largest <= 1e-9 else f"{largest:.2g}"
+    return out
+
+
 def mechanism_numbers(table: pd.DataFrame, median_cars: float) -> dict[str, str]:
     """From the model-selection sweep: how often every bound held beside delivery with the
     allocation fixed and with the hindsight split, at level 0.15 for the learned model, and at
@@ -489,6 +506,9 @@ def later(
         readings[period] = zero_ceilings(sweep, run_rule_levels(folder))
     out = accounting_numbers(frame) | zero_ceiling_numbers(readings)
     out |= hypothesis_numbers(made["hypotheses"], made["theorem"], made["days_available"])
+    frozen = results / f"evaluate-{'rehearsal-' if rehearsal else ''}evaluation"
+    days = pd.read_csv(frozen / "days.csv.gz", dtype={"arm": str})
+    out |= offer_days(days, {"4": "a", "5": "b"}, "ev_h1_reg")
     out |= mechanism_numbers(table, float(numbers["median_cars"]))
     out["table_accounting"] = accounting_table(frame)
     out["table_hypotheses"] = hypotheses_table(made["hypotheses"])

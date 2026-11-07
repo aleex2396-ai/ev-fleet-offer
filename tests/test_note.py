@@ -151,3 +151,16 @@ def test_the_accounting_table_has_a_dash_where_a_period_has_no_step():
     forecasts = next(line for line in html.splitlines() if "Forecasts" in line)
     assert forecasts.count("<td>0</td>") == 9 and forecasts.count("<td>–</td>") == 3
     assert "40.0 (40%)" in html
+
+
+def test_offer_days_counts_scored_days_above_the_zero_line():
+    days = pd.DataFrame(
+        {
+            "arm": ["4", "4", "5", "5", "5"],
+            "size_kwh": [0.0, 4e-14, 0.0, 0.003355, 2.0],
+            "cars_with_energy": [6, 6, 6, 6, 3],  # the last day is not scored (fewer than 5)
+            "decision_time": pd.Timestamp("2019-09-23 17:00", tz="UTC"),
+        }
+    )
+    got = note.offer_days(days, {"4": "a", "5": "b"}, "k")
+    assert got == {"k_pos_a": "0", "k_max_a": "0", "k_pos_b": "1", "k_max_b": "0.0034"}
