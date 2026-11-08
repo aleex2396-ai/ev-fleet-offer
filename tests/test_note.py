@@ -230,10 +230,12 @@ def test_the_hypotheses_table_reads_in_words():
     }
     table = note.hypotheses_table(hyp)
     # no internal arm labels, relative changes of a zero offer, or negative zeros
-    assert "arm" not in table and "relative" not in table and "-0.00" not in table
+    assert "arm" not in table and "relative" not in table
+    assert "-0.00" not in table and "\N{MINUS SIGN}0.00" not in table
     # an offer too small to show at two decimals gets no difference; a visible one does
     assert "fail: 0.00 against 0.00&#160;kWh, delivered on 90% and 95% of days</td>" in table
-    assert "difference -1.58&#160;kWh (-1.78 to -1.36)" in table
+    m = "\N{MINUS SIGN}"
+    assert f"difference {m}1.58&#160;kWh ({m}1.78 to {m}1.36)" in table
     assert "not testable: both offers are zero (delivered on 100% and 100% of days)" in table
     assert "2 August 2021" in table and "15 scored weekdays" in table
     assert "JPL" not in table  # no row for a run that is absent

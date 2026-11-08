@@ -85,13 +85,13 @@ def plot_monthly(
         _quiet_axes(ax)
     bottom.xaxis.set_major_locator(mdates.MonthLocator(bymonth=(1, 7)))
     bottom.xaxis.set_major_formatter(mdates.DateFormatter("%b %Y"))
-    top.legend(loc="lower left", frameon=False, fontsize=8, ncol=len(rules), labelcolor=INK_2)
-
-    fig.suptitle(title, x=0.01, ha="left", fontsize=11, color=INK)
+    words = [fig.suptitle(title, x=0.01, ha="left", fontsize=11, color=INK)]
     bottom_margin = 0.0
     if note:
         wrapped = textwrap.fill(note, width=120)
-        fig.text(0.01, 0.01, wrapped, fontsize=7.5, color=INK_2, ha="left", va="bottom")
+        words.append(
+            fig.text(0.01, 0.01, wrapped, fontsize=7.5, color=INK_2, ha="left", va="bottom")
+        )
         bottom_margin = 0.025 * (wrapped.count("\n") + 1) + 0.01
     fig.tight_layout(rect=(0, bottom_margin, 0.9, 0.97))
 
@@ -101,8 +101,28 @@ def plot_monthly(
 
     path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(path, facecolor=SURFACE)
+    # the same figure without its heading and note, for a page whose caption carries both
+    for text in words:
+        text.set_visible(False)
+    fig.savefig(bare(path), facecolor=SURFACE, bbox_inches="tight", pad_inches=0.04)
     plt.close(fig)
     return path
+
+
+def _name_line(ax, text: str, *, y: float, x: float = 0.5) -> None:
+    """A short label just above a horizontal reference line, at `x` across the panel (the
+    middle by default, where the monthly panels have no data across the closure)."""
+    ax.annotate(
+        text,
+        xy=(x, y),
+        xycoords=("axes fraction", "data"),
+        xytext=(0, 2),
+        textcoords="offset points",
+        ha="center",
+        va="bottom",
+        fontsize=7,
+        color=INK_2,
+    )
 
 
 def _label_line_ends(fig, ax, items) -> None:
@@ -219,6 +239,7 @@ def plot_offers_monthly(
             bottom.plot(x.iloc[run], m["size_mean_kwh"].iloc[run], label=name, **line)
         shown.extend(x)
     top.axhline(100 * target, color=INK_2, lw=0.9, zorder=1)
+    _name_line(top, f"{100 * target:.0f}% of days", y=100 * target)
     top.set_ylabel("days delivered (%)", color=INK_2, fontsize=9)
     top.set_ylim(0, 102)
     bottom.set_ylabel("offer size (kWh, mean)", color=INK_2, fontsize=9)
@@ -285,6 +306,7 @@ def plot_frontier(
                     label=label if k == 0 else None,
                 )
         ax.axhline(100 * target, color=INK_2, lw=0.8)
+        _name_line(ax, f"{100 * target:.0f}%", y=100 * target)
         ax.set_ylim(0, 102)
         ax.set_title("days delivered by month, 95% week-block interval", fontsize=9, loc="left")
         months = monthly[monthly["arm"].isin(list(monthly_arms))]["month"]
@@ -320,6 +342,18 @@ def plot_frontier(
                 fontsize=7,
             )
         ax.axvline(100 * target, color=INK_2, lw=0.8)
+        ax.annotate(
+            f"{100 * target:.0f}% of days",
+            xy=(100 * target, 0.45),  # clear of the curves (low) and the oracle's label (high)
+            xycoords=("data", "axes fraction"),
+            xytext=(-3, 0),
+            textcoords="offset points",
+            rotation=90,
+            ha="right",
+            va="center",
+            fontsize=7,
+            color=INK_2,
+        )
         ax.set_title(name, fontsize=9, color=INK, loc="left")
         ax.set_xlabel("days delivered (%)", color=INK_2, fontsize=9)
         ax.set_xlim(right=101)

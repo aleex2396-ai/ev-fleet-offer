@@ -107,7 +107,7 @@ FIGURES = {
     "figure-1.png": ("report", "figure2-bare.png"),
     "figure-2.png": ("report", "figure3-average-bare.png"),
     "figure-3.png": ("here", "zero-ceilings-bare.png"),
-    "figure-4.png": ("report", "figure1.png"),
+    "figure-4.png": ("report", "figure1-bare.png"),
 }
 
 
@@ -721,14 +721,18 @@ def baseline_sentence(loss: pd.Series) -> str:
 
 def sealed_composition(folder: Path, start: pd.Timestamp | None) -> dict[str, str]:
     """How the sealed months' scored weekdays split around the closure: those in 2020 (before
-    it) and those from the reopening year on, from the perfect-knowledge arm's days."""
+    it) and those from the reopening year on, with the month of the first of them, from the
+    perfect-knowledge arm's days."""
     days = pd.read_csv(Path(folder) / "days.csv.gz", dtype={"arm": str}, low_memory=False)
     days["decision_time"] = pd.to_datetime(days["decision_time"], utc=True)
     scored = evaluation.scored_days(days[days["arm"] == "1a"], start)
-    year = scored["decision_time"].dt.tz_convert(evaluation.LOCAL_TZ).dt.year
+    local = scored["decision_time"].dt.tz_convert(evaluation.LOCAL_TZ)
+    year = local.dt.year
+    later = local[year > 2020]
     return {
         "se_days_2020": str(int((year == 2020).sum())),
         "se_days_2021": str(int((year > 2020).sum())),
+        "se_2021_from": f"{later.min():%B %Y}" if len(later) else "–",
     }
 
 
@@ -750,7 +754,8 @@ def sealed_zero_ceiling_sentence(r: dict) -> str:
 def _kwh(x) -> str:
     if x is None or pd.isna(x):
         return "–"
-    return f"{0.0 if abs(x) < 0.005 else x:.2f}"  # no "-0.00"
+    text = f"{0.0 if abs(x) < 0.005 else x:.2f}"  # no "-0.00"
+    return text.replace("-", "\N{MINUS SIGN}")  # a minus sign, not a hyphen
 
 
 def _rate(x) -> str:
