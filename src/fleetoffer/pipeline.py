@@ -647,6 +647,13 @@ def run_accounting(levels_dir: Path, options_dir: Path, out: Path) -> pd.DataFra
     return frame
 
 
+def offering_runs(runs: list[dict]) -> list[dict]:
+    """The runs that made offers. A run with no day at all (a perfect-knowledge piece that
+    covers months with no weekday) is left out of the join: its empty table would leave the
+    joined time column untyped. It holds no day, car or log row, so no number changes."""
+    return [r for r in runs if "days" in r and not r["days"].empty]
+
+
 def run_evaluation(
     period: str, data_root: Path, out: Path, *, unseal: bool = False, workers: int = 10
 ) -> dict:
@@ -662,7 +669,7 @@ def run_evaluation(
     runs = evaluation.run_period(
         period, data_root, unseal=unseal, workers=workers, store=out / "runs"
     )
-    arms = [r for r in runs if "days" in r]
+    arms = offering_runs(runs)
     days = pd.concat([r["days"] for r in arms], ignore_index=True)
     days.to_csv(out / "days.csv.gz", index=False)
     pd.concat([r["cars"] for r in arms], ignore_index=True).to_csv(out / "cars.csv.gz", index=False)

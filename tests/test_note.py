@@ -1,3 +1,4 @@
+import json
 import re
 
 import numpy as np
@@ -327,3 +328,15 @@ def test_monthly_lines_break_at_a_gap():
         pd.to_datetime(["2020-01-15", "2020-02-15", "2020-03-15", "2021-08-15", "2021-09-15"])
     )
     assert figures._runs(x) == [slice(0, 3), slice(3, 5)]
+
+
+def test_a_job_left_out_of_a_run_is_named_and_nothing_is_said_otherwise(tmp_path):
+    assert note.left_out_sentence(tmp_path) == ""
+    manifest = {"jobs": [["jpl", "jpl", "4d", "average", "updating", True]] * 36}
+    (tmp_path / "manifest.json").write_text(json.dumps(manifest))
+    assert note.left_out_sentence(tmp_path) == ""
+    manifest |= {"jobs_left_out": ["jpl-jpl-6d-average-updating-True"], "registered_jobs": 37}
+    (tmp_path / "manifest.json").write_text(json.dumps(manifest))
+    text = note.left_out_sentence(tmp_path)
+    assert text.startswith(" One of its 37 runs, the stratified model calibrated on delivery,")
+    assert "updating on JPL days, did not finish and is left out" in text

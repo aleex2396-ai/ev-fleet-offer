@@ -39,7 +39,10 @@
 - Intervals are 95%, resampling whole weeks.
 - Each offer is given with the share of days it was delivered on; in the sealed months the two are not at matched delivery (100% and 92%).
 - The sealed months are the scored weekdays from 1 March 2020: 9 before the campus closure and 17 from July 2021.
-- **JPL**, run once with the Caltech pipeline frozen: (pending).
+- **JPL**, a replication run once and read descriptively:
+  - With the Caltech pipeline frozen, the calibrated learned offer is 0.28 kWh against 0.54 kWh for the population, delivered on 99% and 96% of days.
+  - Updating on JPL days, 1.88 against 1.87 kWh, both delivered on 90% of days: a difference of 0.01 kWh (95% interval −0.52 to 0.55).
+  - One of its 37 runs (the stratified model calibrated on delivery, updating on JPL days) did not finish and is left out; no result here uses it.
 
 **Outcome**, of those the analysis plan names:
 

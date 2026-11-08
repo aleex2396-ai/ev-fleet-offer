@@ -863,6 +863,36 @@ def mechanism_numbers(table: pd.DataFrame, median_cars: float) -> dict[str, str]
     }
 
 
+MODEL_WORDS = {"4": "learned", "5": "population", "6": "stratified"}
+TRACK_WORDS = {"frozen": "with the Caltech pipeline frozen", "updating": "updating on JPL days"}
+
+
+def left_out_sentence(folder: Path) -> str:
+    """A sentence naming each job a run's manifest lists as left out (`jobs_left_out`), or
+    nothing when every registered job is in the run."""
+    path = Path(folder) / "manifest.json"
+    if not path.exists():
+        return ""
+    manifest = json.loads(path.read_text())
+    gone = manifest.get("jobs_left_out", [])
+    if not gone:
+        return ""
+    words = []
+    for job in gone:
+        _, _, arm, _, track, _ = job.split("-")
+        model = MODEL_WORDS[arm.rstrip("d")]
+        how = " calibrated on delivery" if arm.endswith("d") else ""
+        words.append(f"the {model} model{how}, {TRACK_WORDS[track]}")
+    count = "One" if len(gone) == 1 else str(len(gone))
+    total = manifest.get("registered_jobs", len(manifest.get("jobs", [])) + len(gone))
+    return (
+        f" {count} of its {total} runs, {'; '.join(words)}, did not finish and "
+        f"{'is' if len(gone) == 1 else 'are'} left out; no table or figure here uses "
+        f"{'it' if len(gone) == 1 else 'them'} ([`docs/registration.md`](../docs/registration.md),"
+        ' "Changes after the tag").'
+    )
+
+
 def later(
     results: Path, report: Path, reached: dict[str, float], numbers: dict, *, rehearsal: bool
 ) -> dict[str, str]:
@@ -913,4 +943,5 @@ def later(
     out |= mechanism_numbers(table, float(numbers["median_cars"]))
     out["table_accounting"] = accounting_table(frame)
     out["table_hypotheses"] = hypotheses_table(made["hypotheses"])
+    out["jpl_left_out_sentence"] = left_out_sentence(results / f"evaluate-{prefix}jpl")
     return out

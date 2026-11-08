@@ -13,6 +13,7 @@ from fleetoffer.pipeline import (
     d1_table,
     main,
     monthly_summary,
+    offering_runs,
     overall_summary,
     run_demo,
 )
@@ -209,3 +210,15 @@ def test_charging_done_counts():
         "not_after_plug_in": 1,
         "after_unplug": 1,
     }
+
+
+def test_an_empty_piece_leaves_the_joined_time_column_typed():
+    when = pd.to_datetime(["2019-09-03 17:00", "2019-09-04 17:00"], utc=True)
+    typed = {"name": "1a", "days": pd.DataFrame({"decision_time": when, "size_kwh": [1.0, 2.0]})}
+    nothing = pd.DataFrame({"decision_time": [], "size_kwh": []}, dtype=object)
+    empty = {"name": "1a", "days": nothing}
+    sweep_only = {"name": "4", "sweep": pd.DataFrame()}
+    runs = offering_runs([empty, typed, sweep_only])
+    assert runs == [typed]
+    joined = pd.concat([r["days"] for r in runs], ignore_index=True)
+    assert isinstance(joined["decision_time"].dtype, pd.DatetimeTZDtype)
