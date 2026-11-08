@@ -149,13 +149,13 @@ times, about every four seconds. Its records are large (about 0.6 MB of JSON per
 pages hold 10 sessions. The pilot signal is the network's own current limit sent to the car,
 not a capability of the vehicle, and is never used as an input at 10:00.
 
-`fleetoffer series caltech` fetches the development period this way one UTC day at a time
-(a month of records is too large to hold at once), from the first session's day to the start
-of the sealed test period, so that no record from it is requested; each day is stored and
-fingerprinted like the session months (`fingerprints/caltech-series.csv`, with each day's UTC
-window). `fleetoffer series caltech --sample` fetches the sample of check D1, one request
-per session by a one-second window on its plug-in time (`fingerprints/caltech-series-d1-sample.csv`).
-`fleetoffer verify caltech --series` recomputes both.
+`fleetoffer series caltech --sample` fetches the sample of check D1, one request per session
+by a one-second window on its plug-in time, and fingerprints it
+(`fingerprints/caltech-series-d1-sample.csv`); `fleetoffer verify caltech --series` recomputes
+that file. `fleetoffer series caltech` would fetch the whole development period one UTC day at
+a time (a month of records is too large to hold at once), stopping at the start of the sealed
+test period so that no record from it is requested. That full fetch was not run: check D1
+failed on its sample, and the estimate below replaces the series.
 
 **The rules of check D1**, fixed in `pipeline.py` and `data.py` before any series was fetched:
 

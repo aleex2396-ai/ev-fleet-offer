@@ -209,7 +209,9 @@ offer the diagnostic recovers: if knowing the empty cars leaves the offer at mat
 far below the perfect-knowledge offer, the atom at zero is not the main reason for the gap, and
 the remaining reasons (the deadline bounds, the common template, the allocation fixed at 10:00)
 are read from the sweep and the hindsight split. These readings are registered for every later
-period (`docs/registration.md`).
+period (`docs/registration.md`). For the empirical rules the second and third
+readings hold by construction (their quantiles never cross, and a rule refitted on car-days
+that took energy has no atom at zero), so for them only the first is informative.
 
 ## How a day's offer is checked
 
@@ -395,7 +397,8 @@ which allows a smaller step.
 
 ## The day-level rules as run
 
-Arms 4, 5 and 6 give every car present at 10:00 its two bounds at one shared quantile level q,
+The three calibrated rules (arms 4, 5 and 6: learned, population and stratified) give every car
+present at 10:00 its two bounds at one shared quantile level q,
 chosen each morning from earlier days (`daylevel.py`).
 
 **The day score.** For a car and a target, its score is the largest level on a grid (0, then
@@ -436,7 +439,10 @@ often than 90% is reported as such. The step γ = 0.03 is the smallest, to two d
 which the bound from a₁ is within 5 points over the scored weekdays of the frozen development
 evaluation: 116 of its 130 weekdays have at least five cars with energy (check D3), and
 γ ≥ a₁/(0.05 · 116 − 0.9) = 0.0204 (computed; `daylevel.aci_step`). With γ = 0.03 the bound is
-13.6% at 116 days (computed). The paper's two-sided form, (max{a₁, 1 − a₁} + γ)/(γT), would
+13.6% at 116 days (computed). As run, the six adaptive rules entered the frozen evaluation at working levels
+between 0.10 and 0.31 (logged on its first scored weekday, 2 September 2019), which gives bounds
+of 13.7% to 19.8% over its 116 scored weekdays (`note.aci_bounds`): the 5-point margin that set
+γ holds from a₁, not over that period. The paper's two-sided form, (max{a₁, 1 − a₁} + γ)/(γT), would
 need γ ≥ 0.188 for the same 5 points, and each failed day would then cut the working level by
 0.17.
 
@@ -447,7 +453,7 @@ reached 0, by a further 0.9γ for each such day, so the bound above holds with 0
 0.9γ times one more than the number of days pending at once; that number and the share of days
 known before the next decision are reported.
 
-**Arm 3, the union bound.** Each car's two bounds at level 0.10/(2n) for n present cars. A
+**The union bound (arm 3).** Each car's two bounds at level 0.10/(2n) for n present cars. A
 level is used only where check D10 supports it (a level between two grid levels needs both);
 elsewhere that bound is trivial, and the share of such cars is reported. D10 governs this arm
 only: the calibrated arms choose their level from past days, not from the model's nominal

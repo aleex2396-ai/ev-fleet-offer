@@ -207,3 +207,50 @@ def test_the_accounting_reads_each_step_at_its_own_delivery_rate():
     assert out.loc[("empty cars known", "4k"), "size_mean_kwh"] == 9.0
     assert out.loc[("hindsight split at 90%", "4"), "size_mean_kwh"] == 2.0
     assert out.loc[("day-level rule as run", "4d"), "share_of_perfect"] == 0.5 / 40.0
+
+
+def test_each_share_is_taken_over_the_days_its_row_covers():
+    day = pd.Timestamp("2019-06-03 17:00", tz="UTC")
+    times = [day, day + pd.Timedelta(days=1)]
+    oracle = pd.DataFrame(
+        {"decision_time": times, "arm": "1a", "form": "average", "size_kwh": [10.0, 30.0]}
+    )
+    rule = oracle.assign(arm="5d", size_kwh=[1.0, 3.0])
+    days = pd.concat([oracle, rule], ignore_index=True).assign(cars_with_energy=6)
+    # the swept model had a fit on the first day only
+    sweep = pd.DataFrame(
+        {"decision_time": [day], "model": "5", "form": "average", "level": 0.1, "size_kwh": 1.0}
+    ).assign(cars_with_energy=6)
+    accounts = pd.DataFrame(
+        [
+            {
+                "form": "average",
+                "step": "perfect knowledge",
+                "who": "1",
+                "size_mean_kwh": 20.0,
+                "share_of_perfect": 1.0,
+                "level": np.nan,
+            },
+            {
+                "form": "average",
+                "step": "forecasts at 90% delivery",
+                "who": "5",
+                "size_mean_kwh": 1.0,
+                "share_of_perfect": 1.0 / 20,
+                "level": 0.1,
+            },
+            {
+                "form": "average",
+                "step": "day-level rule as run",
+                "who": "5d",
+                "size_mean_kwh": 2.0,
+                "share_of_perfect": 2.0 / 20,
+                "level": np.nan,
+            },
+        ]
+    )
+    out = levels.same_days(accounts, sweep, days, start=None).set_index("step")
+    assert out.loc["forecasts at 90% delivery", "share_of_perfect"] == pytest.approx(0.1)
+    assert out.loc["forecasts at 90% delivery", "days"] == 1
+    assert out.loc["day-level rule as run", "share_of_perfect"] == pytest.approx(0.1)
+    assert out.loc["perfect knowledge", "days"] == 2

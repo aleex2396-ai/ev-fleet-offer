@@ -633,6 +633,16 @@ def run_accounting(levels_dir: Path, options_dir: Path, out: Path) -> pd.DataFra
     summary = pd.read_csv(Path(options_dir) / "summary.csv", dtype={"arm": str})
     online = summary[summary["arm"] != "1"]
     frame = levels.accounting(table, oracle, online)
+    # each share over the days its row covers (a change after the tag, docs/registration.md)
+    sweep = _read(Path(levels_dir), "sweep.csv.gz")
+    days = pd.concat(
+        [
+            _read(Path(levels_dir), "oracle.csv.gz"),
+            _read(Path(options_dir), "days.csv.gz").query("arm != '1'"),
+        ],
+        ignore_index=True,
+    )
+    frame = levels.same_days(frame, sweep, days)
     frame.to_csv(Path(out) / "accounting.csv", index=False)
     return frame
 
@@ -813,7 +823,11 @@ def run_report(results: Path, out: Path, *, rehearsal: bool = False) -> dict:
     per_day = pd.concat(
         [
             evaluation.failures(
-                _read(folders[p], "days.csv.gz"), _read(folders[p], "cars.csv.gz"), "4d"
+                evaluation.scored_days(
+                    _read(folders[p], "days.csv.gz"), evaluation.OFFERS_FROM[f"{prefix}{p}"]
+                ),
+                _read(folders[p], "cars.csv.gz"),
+                "4d",
             ).assign(period=p)
             for p in ("evaluation", "sealed")
         ],
@@ -830,14 +844,27 @@ def run_report(results: Path, out: Path, *, rehearsal: bool = False) -> dict:
         )
     )
 
-    accounts = [
-        _read(folders[p], "accounting.csv").assign(period=p)
-        for p in ("evaluation", "sealed", "jpl")
-    ]
-    accounts.append(
-        evaluation.accounting(evaluation.arm_summary(days_by_panel[late]), panels[late]).assign(
-            period=f"sealed, {late} only"
+    # each share over the days its row covers (a change after the tag, docs/registration.md)
+    accounts = []
+    for p in ("evaluation", "sealed", "jpl"):
+        days = _read(folders[p], "days.csv.gz")
+        if "track" in days.columns:  # the second site's accounting is its track 1
+            days = days[(days["track"] == "frozen") | days["arm"].str.startswith("1")]
+        frame = levels.same_days(
+            _read(folders[p], "accounting.csv"),
+            _read(folders[p], "sweep.csv.gz"),
+            days,
+            evaluation.OFFERS_FROM[f"{prefix}{p}"],
         )
+        accounts.append(frame.assign(period=p))
+    late_days = sealed_days[in_late]
+    accounts.append(
+        levels.same_days(
+            evaluation.accounting(evaluation.arm_summary(days_by_panel[late]), panels[late]),
+            sweep_sealed[year == reopened],
+            late_days,
+            None,
+        ).assign(period=f"sealed, {late} only")
     )
     accounts = pd.concat(accounts, ignore_index=True)
     accounts.to_csv(out / "accounting.csv", index=False)

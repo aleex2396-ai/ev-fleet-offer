@@ -155,17 +155,29 @@ def _quiet_axes(ax) -> None:
 def _finish(
     fig, path: Path, title: str, note: str | None, right: float = 0.97, top: float = 0.95
 ) -> Path:
-    fig.suptitle(title, x=0.01, ha="left", fontsize=11, color=INK)
+    words = [fig.suptitle(title, x=0.01, ha="left", fontsize=11, color=INK)]
     bottom_margin = 0.0
     if note:
         wrapped = textwrap.fill(note, width=120)
-        fig.text(0.01, 0.01, wrapped, fontsize=7.5, color=INK_2, ha="left", va="bottom")
+        words.append(
+            fig.text(0.01, 0.01, wrapped, fontsize=7.5, color=INK_2, ha="left", va="bottom")
+        )
         bottom_margin = 0.025 * (wrapped.count("\n") + 1) + 0.01
     fig.tight_layout(rect=(0, bottom_margin, right, top))
     path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(path, facecolor=SURFACE)
+    # the same figure without its heading and note, for a page whose caption carries both
+    for text in words:
+        text.set_visible(False)
+    fig.savefig(bare(path), facecolor=SURFACE, bbox_inches="tight", pad_inches=0.04)
     plt.close(fig)
     return path
+
+
+def bare(path: Path) -> Path:
+    """Where `_finish` saves a figure without its heading and note."""
+    path = Path(path)
+    return path.with_name(f"{path.stem}-bare{path.suffix}")
 
 
 def plot_offers_monthly(

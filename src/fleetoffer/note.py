@@ -18,7 +18,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from fleetoffer import evaluation, figures, levels
+from fleetoffer import daylevel, evaluation, figures, levels
 from fleetoffer.devchecks import SELECTION_START
 from fleetoffer.quantiles import LEVELS
 
@@ -27,7 +27,7 @@ CHROME = "FLEETOFFER_CHROME"  # path of a Chrome or Chromium binary, if not the 
 DEFAULT_CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 MODELS = {"4": ("learned", 0), "5": ("population", 1), "6": ("stratified", 2)}
 TITLE = "Fleet Charging Offers from Forecast Per-Car Sets: Where the Flexibility Is Lost"
-AUTHOR = ""
+AUTHOR = "Weixuan (Alex) Lu"
 
 
 def pct(x: float, digits: int = 1) -> str:
@@ -187,7 +187,8 @@ def accounting_html(frame: pd.DataFrame, form: str) -> str:
 PERIODS = {
     "development": "May–Aug 2019",
     "evaluation": "Sep 2019–Feb 2020",
-    "sealed": "From Mar 2020",
+    "sealed": "Sealed months",
+    "sealed, 2021 only": "2021 only",
     "jpl": "JPL",
 }
 SHARE_ROWS = {
@@ -240,6 +241,19 @@ def accounting_table(frame: pd.DataFrame, form: str = "average") -> str:
         else:
             of_band = f" ({100 / b['share_of_perfect']:.0f}%)" if b is not None else ""
             perfect.append(f'<td colspan="3">{p["size_mean_kwh"]:.1f}{of_band}</td>')
+    counts = []
+    for period in PERIODS:
+        mine = rows[rows["period"] == period]
+        if "days" not in mine.columns or mine["days"].isna().all():
+            counts.append('<td colspan="3">–</td>')
+            continue
+        every = mine.loc[mine["step"] == "perfect knowledge", "days"]
+        fewest = mine.loc[mine["step"].isin(levels.SWEPT_STEPS), "days"].min()
+        text = f"{int(every.iloc[0])}" if len(every) else "–"
+        if pd.notna(fewest) and len(every) and fewest < every.iloc[0]:
+            text += f" ({int(fewest)})"
+        counts.append(f'<td colspan="3">{text}</td>')
+    out.append("<tr><td>Scored weekdays (fewest in a row)</td>" + "".join(counts) + "</tr>")
     out.append("<tr><td>Exact band (kWh)</td>" + "".join(band) + "</tr>")
     out.append("<tr><td>Perfect knowledge (kWh)</td>" + "".join(perfect) + "</tr>")
     for step, label in SHARE_ROWS.items():
@@ -310,23 +324,109 @@ def zero_ceilings(table: pd.DataFrame, reached: dict[str, float]) -> dict[str, f
     return out
 
 
-def hypotheses_table(hyp: dict) -> str:
-    """Table II's rows: the results table of `fleetoffer report` (one source for both), as
-    HTML. The row on the 2022 theorem is left to the text."""
-    from fleetoffer.pipeline import results_table
+def comparison_words(c: dict) -> str:
+    """One paired comparison of offers (`evaluation.paired`, one-week blocks) in words: its
+    reading, both mean offers with their delivery rates, and the difference with its interval
+    when either offer is visible at two decimals."""
+    if not c:
+        return "–"
+    sizes = f"{_kwh(c.get('mean_a_kwh'))} against {_kwh(c.get('mean_b_kwh'))}&#160;kWh"
+    rates = f"delivered on {_rate(c.get('delivered_a'))} and {_rate(c.get('delivered_b'))} of days"
+    reading = str(c.get("reading", "–")).replace("both arms offer zero", "both offers are zero")
+    if reading.startswith("not testable"):
+        return f"{reading} ({rates})"
+    text = f"{reading}: {sizes}, {rates}"
+    kwh = c.get("absolute_kwh", {})
+    visible = max(abs(c.get("mean_a_kwh") or 0.0), abs(c.get("mean_b_kwh") or 0.0)) >= 0.005
+    if kwh and visible:
+        text += (
+            f"; difference {_kwh(kwh.get('estimate'))}&#160;kWh "
+            f"({_kwh(kwh.get('low'))} to {_kwh(kwh.get('high'))})"
+        )
+    return text
 
-    out = ["<thead><tr><th>Hypothesis</th><th>Design</th><th>Reading</th><th>Numbers</th></tr>"]
-    out.append("</thead><tbody>")
-    for line in results_table(hyp).splitlines()[2:]:
-        cells = [c.strip() for c in line.strip().strip("|").split("|")]
-        if not line.strip() or cells[0].startswith("Theorem"):
-            continue
-        out.append("<tr>" + "".join(f"<td>{c}</td>" for c in cells) + "</tr>")
+
+def hypotheses_table(hyp: dict) -> str:
+    """Table II's rows, in words: each registered hypothesis, and H1 under the design
+    calibrated on delivery, on the frozen evaluation and the sealed months; H1 at JPL on both
+    tracks when that run is present. The 2022 theorem is left to the text."""
+    ev, se, jpl = hyp["evaluation"], hyp["sealed"], hyp.get("jpl", {})
+
+    def h2(h: dict) -> str:
+        if not h:
+            return "–"
+        return (
+            f"{h.get('reading', '–')}: delivered on {_rate(h.get('delivered_3'))} of days, "
+            f"{_kwh(h.get('size_3_kwh'))}&#160;kWh against {_kwh(h.get('size_4_kwh'))} for the "
+            "learned offer"
+        )
+
+    def h4(h: dict) -> str:
+        if "learned_hours" not in h:
+            return "–"
+        days = h.get("car_days")
+        return (
+            f"{h.get('reading', '–')}: {h['learned_hours']:.2f} against "
+            f"{h['population_hours']:.2f}&#160;h, coverage {_rate(h.get('learned_coverage'))} "
+            f"and {_rate(h.get('population_coverage'))}"
+            + (f", {days:,} car-days" if isinstance(days, int) else "")
+        )
+
+    h3 = se.get("h3", {}).get("4 against 4f", {})
+    h3a, h3b = evaluation.h3_readings(h3) if "reopening" in h3 else ("–", "–")
+    when = pd.Timestamp(se["reopening"]).strftime("%-d %B %Y") if se.get("reopening") else "–"
+    h3_text = h3a if h3a == h3b else f"H3a {h3a}; H3b {h3b}"
+    rows = [
+        (
+            "H1, learned offer at least 10% larger than population",
+            "registered",
+            comparison_words(ev.get("h1_registered", {}).get("one_week", {})),
+            comparison_words(se.get("h1_registered", {}).get("one_week", {})),
+        ),
+        (
+            "H1",
+            "calibrated on delivery",
+            comparison_words(ev.get("h1_secondary", {}).get("one_week", {})),
+            comparison_words(se.get("h1_secondary", {}).get("one_week", {})),
+        ),
+        (
+            "H2, union bound delivered on at least 98% of days, at most half the learned offer",
+            "registered",
+            h2(ev.get("h2", {})),
+            h2(se.get("h2", {})),
+        ),
+        (f"H3a and H3b, after the reopening ({when})", "both", "–", h3_text),
+        (
+            "H4, learned stay bound at least 0.5&#160;h longer at matched 90% coverage",
+            "per car",
+            h4(ev.get("h4", {})),
+            h4(se.get("h4", {})),
+        ),
+    ]
+    out = [
+        "<thead><tr><th>Hypothesis</th><th>Design</th><th>Caltech, Sep 2019–Feb 2020</th>"
+        "<th>Caltech, from Mar 2020</th></tr></thead><tbody>"
+    ]
+    out += [f"<tr><td>{a}</td><td>{b}</td><td>{c}</td><td>{d}</td></tr>" for a, b, c, d in rows]
+    for track, label in (("frozen", "Caltech pipeline frozen"), ("updating", "updating on JPL")):
+        for key, design in (("h1_registered", "registered"), ("h1_secondary", "on delivery")):
+            c = jpl.get(track, {}).get(key, {}).get("one_week", {})
+            if c:
+                out.append(
+                    f"<tr><td>H1 at JPL, {label} (descriptive)</td><td>{design}</td>"
+                    f'<td colspan="2">{comparison_words(c)}</td></tr>'
+                )
     out.append("</tbody>")
     return "\n".join(out)
 
 
-PREFIX = {"development": "dev", "evaluation": "ev", "sealed": "se", "jpl": "jpl"}
+PREFIX = {
+    "development": "dev",
+    "evaluation": "ev",
+    "sealed": "se",
+    "sealed, 2021 only": "late",
+    "jpl": "jpl",
+}
 
 
 def accounting_numbers(frame: pd.DataFrame) -> dict[str, str]:
@@ -366,6 +466,55 @@ def accounting_numbers(frame: pd.DataFrame) -> dict[str, str]:
     return out
 
 
+WHERE = {
+    "development": "on May to August 2019",
+    "evaluation": "from September 2019 to February 2020",
+    "sealed": "in the sealed months",
+    "sealed, 2021 only": "in 2021 alone",
+    "jpl": "at JPL",
+}
+
+
+def _leader(rows: pd.DataFrame, step: str) -> str | None:
+    """The model (first character of `who`) keeping strictly the largest share at `step`."""
+    shares = rows[rows["step"] == step].dropna(subset=["share_of_perfect"])
+    if len(shares) < 2:
+        return None
+    ranked = shares.sort_values("share_of_perfect", ascending=False)
+    first, second = ranked["share_of_perfect"].iloc[0], ranked["share_of_perfect"].iloc[1]
+    return str(ranked["who"].iloc[0])[0] if first > second else None
+
+
+def model_order_sentence(frame: pd.DataFrame) -> str:
+    """Which model keeps the most of the perfect-knowledge offer under the fixed allocation and
+    under the hindsight split (day-average base set), in each period the frame holds."""
+    reversed_in, other_in, pairs = [], [], []
+    for period, where in WHERE.items():
+        rows = frame[(frame["period"] == period) & (frame["form"] == "average")]
+        fixed = _leader(rows, "forecasts at 90% delivery")
+        hind = _leader(rows, "hindsight split at 90%")
+        if fixed is None and hind is None:
+            continue
+        if fixed == "5" and hind == "4":
+            reversed_in.append(where)
+            h = rows[rows["step"] == "hindsight split at 90%"]
+            share = {str(w)[0]: s for w, s in zip(h["who"], h["share_of_perfect"], strict=True)}
+            pairs.append(f"{pct(share['4'], 0)} and {pct(share['5'], 0)}")
+        else:
+            other_in.append(where)
+    if not reversed_in:
+        return ""
+    text = (
+        "The order of the models reverses between the two: under the fixed allocation the "
+        "population model keeps the most, under the hindsight split the learned model does "
+        f"(learned and population under the hindsight split: {'; '.join(pairs)}, in the order "
+        "of Table I's columns)"
+    )
+    if other_in:
+        text += f"; the order differs {', '.join(other_in)}"
+    return text + "."
+
+
 def zero_ceiling_numbers(readings: dict[str, dict]) -> dict[str, str]:
     """The zero-ceiling readings the text quotes, per period (`zero_ceilings` for each)."""
     out: dict[str, str] = {}
@@ -377,6 +526,54 @@ def zero_ceiling_numbers(readings: dict[str, dict]) -> dict[str, str]:
         out[f"{p}_zc_falls"] = "holds" if r["falls"] else "does not hold"
         out[f"{p}_zc_known_max"] = pct(r["known_max"], 1)
     return out
+
+
+def aci_bounds(folder: Path, start: pd.Timestamp | None) -> dict[str, float]:
+    """For each adaptive day-level arm of a run (4, 5, 6 and 4d, 5d, 6d), the bound on its share
+    of failed days over the run's scored weekdays, from the working level logged on the first
+    of them (`daylevel.aci_failure_bound`; each outcome known before the next decision)."""
+    folder = Path(folder)
+    days = pd.read_csv(folder / "days.csv.gz", dtype={"arm": str}, low_memory=False)
+    logs = pd.read_csv(folder / "logs.csv.gz", dtype={"arm": str}, low_memory=False)
+    for frame in (days, logs):
+        frame["decision_time"] = pd.to_datetime(frame["decision_time"], utc=True)
+    out = {}
+    for arm in ("4", "5", "6", "4d", "5d", "6d"):
+        scored = evaluation.scored_days(days[days["arm"] == arm], start)
+        mine = logs[(logs["arm"] == arm) & logs["decision_time"].isin(scored["decision_time"])]
+        if mine.empty:
+            continue
+        first = float(mine.sort_values("decision_time")["miss_at_decision"].iloc[0])
+        out[arm] = daylevel.aci_failure_bound(len(scored), start=first)
+    return out
+
+
+def sealed_composition(folder: Path, start: pd.Timestamp | None) -> dict[str, str]:
+    """How the sealed months' scored weekdays split around the closure: those in 2020 (before
+    it) and those from the reopening year on, from the perfect-knowledge arm's days."""
+    days = pd.read_csv(Path(folder) / "days.csv.gz", dtype={"arm": str}, low_memory=False)
+    days["decision_time"] = pd.to_datetime(days["decision_time"], utc=True)
+    scored = evaluation.scored_days(days[days["arm"] == "1a"], start)
+    year = scored["decision_time"].dt.tz_convert(evaluation.LOCAL_TZ).dt.year
+    return {
+        "se_days_2020": str(int((year == 2020).sum())),
+        "se_days_2021": str(int((year > 2020).sum())),
+    }
+
+
+def sealed_zero_ceiling_sentence(r: dict) -> str:
+    """The sentence on the sealed months' zero ceilings (`zero_ceilings` for that period). A
+    rule whose median level is below the lowest quantile level gives every car a zero bound by
+    construction, so those months do not test the proposition; the sentence says so."""
+    medians = [r[f"level_{model}"] for model in MODELS]
+    if all(q < LEVELS[0] - 1e-12 for q in medians):
+        where = "0" if all(q == 0 for q in medians) else f"below the lowest level, {pct(LEVELS[0])}"
+        return (
+            f"In the sealed months the median level of every rule was {where}, where every bound "
+            "is zero by construction, so those months do not test the proposition."
+        )
+    shares = ", ".join(pct(r[f"at_{m}"], 0) for m in ("4", "6")) + f" and {pct(r['at_5'], 0)}"
+    return f"In the sealed months the shares are {shares}."
 
 
 def _kwh(x) -> str:
@@ -505,6 +702,16 @@ def later(
         sweep = pd.read_csv(folder / "sweep_table.csv", dtype={"model": str})
         readings[period] = zero_ceilings(sweep, run_rule_levels(folder))
     out = accounting_numbers(frame) | zero_ceiling_numbers(readings)
+    out["model_order_sentence"] = model_order_sentence(frame)
+    out["se_zc_sentence"] = sealed_zero_ceiling_sentence(readings["sealed"])
+    prefix = "rehearsal-" if rehearsal else ""
+    bounds = aci_bounds(
+        results / f"evaluate-{prefix}evaluation", evaluation.OFFERS_FROM[f"{prefix}evaluation"]
+    )
+    out["ev_aci_min"], out["ev_aci_max"] = pct(min(bounds.values())), pct(max(bounds.values()))
+    out |= sealed_composition(
+        results / f"evaluate-{prefix}sealed", evaluation.OFFERS_FROM[f"{prefix}sealed"]
+    )
     out |= hypothesis_numbers(made["hypotheses"], made["theorem"], made["days_available"])
     frozen = results / f"evaluate-{'rehearsal-' if rehearsal else ''}evaluation"
     days = pd.read_csv(frozen / "days.csv.gz", dtype={"arm": str})

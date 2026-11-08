@@ -204,7 +204,8 @@ def accounting(
     rate: float = ACCOUNTING_RATE,
 ) -> pd.DataFrame:
     """Where the perfect-knowledge offer goes, per offer form: the exact band of the true sets
-    (programme forms only, a ceiling no single offer need reach), the oracle's offer, the
+    (programme forms only: the band of the exact aggregate set, which an offer of the form
+    p + alpha U0 need not reach), the oracle's offer, the
     largest swept offer of each model delivered on `rate` of days under the fixed allocation,
     the same with the empty cars known and with a split chosen with hindsight, and each
     day-level rule as run. Every row is compared at its own delivery rate, shown beside it.
@@ -263,3 +264,46 @@ def accounting(
         for _, r in online[online["form"] == form].iterrows():
             add("day-level rule as run", r["arm"], r["size_mean_kwh"], r["fixed_delivered"])
     return pd.DataFrame(rows)
+
+
+SWEPT_STEPS = ("forecasts at 90% delivery", "empty cars known", "hindsight split at 90%")
+
+
+def same_days(
+    accounts: pd.DataFrame,
+    sweep: pd.DataFrame,
+    days: pd.DataFrame,
+    start: pd.Timestamp | None = SELECTION_START,
+) -> pd.DataFrame:
+    """`accounting`'s rows with each share of the perfect-knowledge offer taken over the days
+    that row was measured on. A swept model makes no offer on a day without a fit, so a row can
+    cover fewer scored days than the perfect-knowledge offer, and dividing by the perfect-
+    knowledge mean over every scored day would compare different days. `sweep` holds the
+    sweep's day rows, `days` the day rows of the oracle (arms 1 and 1a) and of the day-level
+    arms. Adds `days` (scored weekdays behind the row) and `perfect_same_days_kwh`; the exact
+    band and the perfect-knowledge rows keep every scored day."""
+    swept = scored(sweep[sweep["size_kwh"].notna()], start)
+    rows = scored(days[days["size_kwh"].notna()], start)
+    oracle = rows[rows["arm"].astype(str).isin(["1", "1a"])]
+    out = accounts.copy()
+    out["days"] = np.nan
+    out["perfect_same_days_kwh"] = np.nan
+    for i, r in out.iterrows():
+        if r["step"] in SWEPT_STEPS:
+            mine = swept[
+                (swept["model"].astype(str) == str(r["who"]))
+                & (swept["form"] == r["form"])
+                & np.isclose(swept["level"], r["level"])
+            ]
+        elif r["step"] == "day-level rule as run":
+            mine = rows[(rows["arm"].astype(str) == str(r["who"])) & (rows["form"] == r["form"])]
+        else:
+            out.at[i, "days"] = int((oracle["form"] == r["form"]).sum())
+            continue
+        times = set(mine["decision_time"])
+        perfect = oracle[(oracle["form"] == r["form"]) & oracle["decision_time"].isin(times)]
+        mean = float(perfect["size_kwh"].mean()) if len(perfect) else np.nan
+        out.at[i, "days"] = len(times)
+        out.at[i, "perfect_same_days_kwh"] = mean
+        out.at[i, "share_of_perfect"] = r["size_mean_kwh"] / mean if mean > 1e-9 else np.nan
+    return out

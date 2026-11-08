@@ -4,35 +4,76 @@
 
 An aggregator that schedules electric-vehicle charging can sell flexibility to the grid only if it can say in advance how much charging it can shift and then deliver it. At a car park the offer depends on the cars plugged in: when each will leave, and how much energy each will still take. Both are uncertain, and both change over time.
 
-The offer can be built from a **population** view (every present car gets bounds from the site's recent sessions, given only how long it has already been plugged in) or from a **learned** view (each car gets its own bounds, predicted from what is known about it and its driver at the moment the offer is made). This project builds both on the public Caltech ACN-Data charging sessions and turns each into a fleet offer with the inner-approximation method of Al Taha, Vincent and Bitar (2024, Theorem 2). Each offer is calibrated on past days to a target of delivery on 90% of days, and both are scored by replaying them against the cars that were actually present. Three things are measured: how large each offer is beside the delivery rate it achieves, how much the learned model adds over the population view under the same calibration, and how both change across the 2020 campus closure, after which the median stay at the site fell from about six hours to under two.
+At 10:00 on each weekday this project gives every car plugged in a lower bound on when it will leave and on how much energy it will still take, either from a **population** view (the site's recent sessions, given how long the car has been plugged in) or from a **learned** view (a model of that car and its driver). It turns the bounds into a fleet offer with the inner-approximation method of Al Taha, Vincent and Bitar (2024, Theorem 2), sets one quantile level per day from past days to target delivery on 90% of days, and scores each offer by replaying the cars that were actually present. The data are the public charging sessions of ACN-Data at Caltech, with the Jet Propulsion Laboratory (JPL) as a second site. The hypotheses, thresholds and analyses were fixed in the git tag `analysis-plan` before the test months were opened (`docs/analysis-plan.md`, `docs/registration.md`); "registered" below means fixed there.
 
-The result is one of three sentences, each worth reporting: per-car learning offers more flexibility at the same delivery rate and keeps its margin through the change; or, once both are calibrated by day, it offers no more than the population view, so per-car accuracy does not survive aggregation; or offers calibrated car by car fail at fleet level right after the change, on days when many drivers' errors share a sign, and restoring 90% of days costs a measured share of the offer. Shared errors within a day are one explanation to be tested, not a conclusion written in advance.
+## Results
 
-## Status
+**Per-car learning tightens each car's bounds, and the gain does not reach the fleet offer.** From September 2019 to February 2020, at matched coverage (90.7% for both), the learned bound keeps 2.93 h of each car's remaining stay against 2.01 h for the population bound. Calibrated to be delivered on 90% of days, the fleet offer made from the learned bounds is 0.18 kWh against 1.76 kWh from the population bounds, delivered on 91% and 90% of days: 0.4% and 3.9% of the 45.6 kWh the same method offers with perfect knowledge of every car.
 
-In development. The checks, settings and per-car scores so far use Caltech data before September 2019 only (`docs/data.md`, `docs/theory.md`, `docs/registration.md`); the runs fixed by the tag have started, and no evaluation result is published here yet. The analysis plan (`docs/analysis-plan.md`: decision, offers, models, hypotheses with pass and fail criteria, the checks to run on development data, and the list of earlier looks at the data) is frozen by the git tag `analysis-plan` before any confirmatory run and before any sealed data are opened. "Pre-registered" below means fixed in that document before the tag.
+The runs are those of the tagged commit; every change made after the tag is listed in `docs/registration.md`. A scored weekday is one on which at least five cars present at 10:00 take energy afterwards. Means are over scored weekdays, 95% intervals resample whole weeks, and offers are compared only at matched delivery rates.
 
-## Development results (May to August 2019)
+### Registered hypotheses
 
-Every setting was chosen on these months, so their numbers describe the method; they are not a test. Means over the 85 scored weekdays, offers on the day-average base set (`uv run fleetoffer levels`, then `uv run fleetoffer accounting`; the analyses after the first fleet run are listed in `docs/registration.md`).
+The sealed months are the scored weekdays from 1 March 2020: 9 in March 2020, before the campus closure, and 17 from August 2021, after the reopening; few cars came in between.
 
-- With perfect knowledge the offer reaches 42% of the exact band width (39.4 of 93.7 kWh).
-- Under this formulation (one common level, a template, fixed allocation) the offer made from forecasts keeps about 4% of the perfect-knowledge offer (1.55 of 39.4 kWh, population model calibrated on delivery, delivered on 88% of days). The registered rule gives the learned offer zero on every scored weekday.
-- At the shared level each registered day-level rule reaches (median 0.3% for the learned model, 0.9% for the stratified table, 2.8% for the population model), most cars get an energy ceiling of zero: every car that took energy under the learned and stratified models, about three in four under the population model. A lower bound at level q is zero exactly when the car's chance of taking nothing more is at least q (`docs/theory.md`), and 16.4% of car-days at 10:00 take nothing more.
-- Knowing which cars take nothing does not restore the offer: delivered on 90% of days under the fixed allocation, it keeps 0% to 1.9% of the perfect-knowledge offer. The same offers delivered by a split among the cars chosen with hindsight keep 21% to 56% at 90% delivery, an upper bound rather than a method. This is consistent with the allocation fixed at 10:00, more than the cars that take nothing, being where the offer is lost.
+| Hypothesis | September 2019 to February 2020 (116 scored weekdays) | Sealed months (26) |
+|---|---|---|
+| H1: the learned offer is at least 10% larger than the population offer, under the registered day-level rule | Fail by the registered rule, with both offers in effect zero: the learned offer is zero on every day, the population offer on all but one (0.0034 kWh on 23 September 2019, not delivered) | Not testable: both offers are zero |
+| H2: the union-bound offer is delivered on at least 98% of days and is at most half the learned offer | Pass, vacuously: delivered on 98% of days, and both offers are zero | Pass, vacuously: delivered on every day, and both offers are zero |
+| H3: after the 2021 reopening, an offer never updated fails, and the adaptive rule restores 90% of days within 40 scored weekdays | – | Not testable: the registered rule dates the reopening to 2 August 2021, and the record ends 15 scored weekdays later; each clause needs 20 |
+| H4: the learned stay bound keeps at least 0.5 h more than the population bound at matched 90% coverage | Pass: 2.93 h against 2.01 h (coverage 90.7% and 90.7%, 2,055 car-days) | Pass: 2.11 h against 1.52 h (89.4% and 89.2%, 426 car-days) |
+| JPL, run once with the Caltech pipeline frozen | (pending) | |
+
+The predictions written before any fleet result was seen are in `docs/predictions.md`.
+
+### Calibrated on delivery (secondary, chosen after the May to August 2019 look)
+
+The registered rule counts a day as failed when any car's bound fails, and the levels it then needs give every offer zero (below). A secondary rule, fixed before the tag and labelled as chosen after the first development results, counts a day as failed only when the offer was not delivered, and uses the day-average base set of the 2024 paper. Under it the learned offer is 0.18 kWh against 1.76 kWh for the population, delivered on 91% and 90% of days (difference −1.57 kWh, interval −1.78 to −1.36). In the sealed months it is 0 against 0.84 kWh, delivered on 100% and 92% of days (an offer of zero is always delivered; difference −0.84 kWh, interval −1.53 to −0.16).
+
+### Where the offer goes
+
+The offer made with perfect knowledge of every car's set, beside the exact band and beside offers under each relaxation (day-average base set; shares of the perfect-knowledge offer, ranging over the learned, population and stratified models). The rows are read separately, not added. Every setting was chosen on May to August 2019, so that column describes the method; it is not a test.
+
+| | May to Aug 2019 | Sep 2019 to Feb 2020 | Sealed months | 2021 only | JPL |
+|---|---|---|---|---|---|
+| Scored weekdays (fewest behind a row) | 85 (84) | 116 (115) | 26 (16) | 17 (7) | (pending) |
+| Exact band of the cars' true sets (kWh) | 93.7 | 108.5 | 63.9 | 59.8 | |
+| Offer with perfect knowledge (kWh, share of the band) | 39.4 (42%) | 45.6 (42%) | 25.0 (39%) | 24.9 (42%) | |
+| From forecasts, delivered on 90% of days | 0% to 3.6% | 0.5% to 3.6% | 0.3% to 2.7% | 0% to 0.8% | |
+| The same, with the cars that take nothing more known | 0% to 1.9% | 0% to 4.3% | 5.0% to 8.1% | 0.8% to 3.3% | |
+| The same forecasts, each profile split among the cars with hindsight, delivered on 90% of days | 21% to 56% | 26% to 74% | 39% to 68% | 30% to 60% | |
+| Population rule calibrated on delivery, as run (days delivered) | 3.9% (88%) | 3.9% (90%) | 3.4% (92%) | 1.0% (94%) | |
+
+In the three rows at 90% of days, each model's level is the largest swept level delivered on 90% of scored weekdays (under the fixed allocation, or under the hindsight split in its row), a level chosen with hindsight. Each share is taken over the days its row covers: a model makes no offer on a day without a fit, so a row can cover fewer days than the perfect-knowledge offer. The step with the empty cars known also refits the models.
+
+With perfect knowledge the offer reaches 42% of the exact band width (39.4 of 93.7 kWh on May to August 2019). That gap belongs to programme (24) as used here (its structure-preserving form, this base set and an allocation fixed at 10:00), not to the conditions of the 2024 paper's Theorem 2 alone; the programme maximises the base set's scale, not the band width scored here. Under this formulation (one common level, a template, fixed allocation) the offer made from forecasts keeps about 4% of the perfect-knowledge offer (1.55 of 39.4 kWh, population model calibrated on delivery, delivered on 88% of days). Knowing which cars take nothing more does not restore it; neither diagnostic is a method an operator could run. A split chosen with hindsight keeps between a fifth and three quarters, and the order of the models reverses: under the fixed allocation the population model keeps the most in every column, under the hindsight split the learned model does (56% against 21% for the population model on May to August 2019, 74% against 32% from September 2019 to February 2020, 68% against 56% in the sealed months, 60% against 39% in 2021 alone). This is consistent with the allocation fixed at 10:00, more than the cars that take nothing, being where the offer is lost: at level 0.15 on May to August 2019, every bound of the learned model held on none of the scored weekdays, the fixed allocation delivered on 1% of them, and the hindsight split on all of them. The hindsight split chooses both the level and the split after the fact, so it bounds what a re-split could recover; it does not show what an online re-split would.
+
+### Why the registered offers are zero
+
+A 90%-of-days target with about 18 cars present, read as every bound holding, needs each car's bounds at a small level: the registered rules settled at a median of 0.3% to 2.8% on May to August 2019. A lower bound on a car's remaining energy at level q is zero exactly when the car's chance of taking nothing more is at least q (`docs/theory.md`, "Zero ceilings at small levels"), and 16.4% of car-days at 10:00 take nothing more. At the level each registered rule reached, the share of cars that took energy but were given a ceiling of zero was 100%, 100% and 73% for the learned, stratified and population models on May to August 2019, and 88%, 99% and 69% from September 2019 to February 2020. In the sealed months the median level of every registered rule was 0, where every bound is zero by construction, so those months do not test the proposition. Three readings were registered before the counts were read: a large share at the rules' levels, a share that falls as the level rises, and a much smaller share once the empty cars are known. All three hold; the second and third hold by construction for the empirical rules (their quantiles never cross, and a rule refitted on car-days that took energy has no atom at zero), so the first is the informative one.
+
+### Outcome
+
+Of the outcomes the analysis plan names (Section 1), the registered design gives a degenerate offer: both offers are zero, and H1 compares two zeros. The secondary design gives the second outcome: once both are calibrated by day, the learned offer is no larger than the population offer. The third, an offer calibrated car by car that fails after the change at a measured cost of recovery, could not be tested (H3).
+
+### Limits
+
+The energy a car takes after 10:00 is estimated, not measured, and the site's own scheduler shapes it. Whether a car is still charging at 10:00, which an operator would see, is not in the data; the diagnostic with the empty cars known stands in for it. The power cap of 6.7 kW is assumed for every station. Only nine profiles of each offer are checked. The test periods were looked at while the project was scoped: stay statistics, a reading of raw sessions and, for September 2019 to February 2020, the energy of 50 sampled sessions and the daily counts of cars that set the adaptive rule's step (`docs/prior-looks.md`). They are a frozen retrospective check rather than a blind test. The sealed months hold 26 scored weekdays, so their comparisons are wide.
+
+The note in `note/` sets out the problem, the two propositions with proofs, and these results in five pages (`uv run fleetoffer note`).
 
 ## Design
 
-- **The decision.** At 10:00 on each weekday, for the cars plugged in at that moment, a set of fleet charging profiles for 10:00–20:00 in 15-minute steps. Nothing after 10:00 is used; no arrivals are forecast.
-- **Per-car sets.** Each car's flexibility set is a charging-only special case of the generalised battery model of Al Taha, Vincent and Bitar (2024, equation (2)), built as in their Example 1 but without discharge, with an energy ceiling in place of the battery's capacity limit, and without the energy requirement: power between 0 and a cap while plugged in, zero after a deadline, and cumulative energy after 10:00 at most what the car will still take. The set asks nothing of the car: charging nothing is always allowed, so "delivered" means the fleet profile can be split within caps, deadlines and ceilings, not that each driver is charged. The energy given to the cars under each delivered profile is reported beside the delivery rate, and a version with a required-energy floor per car was planned and is not run (`docs/registration.md`). The learned set uses one-sided bounds, a deadline no later than the car is predicted to leave and an energy ceiling no higher than it is predicted to take; a short proposition in `docs/theory.md` shows that the offered set then lies inside the fleet's true set whenever every car's two bounds hold (a sufficient condition, not a necessary one).
-- **The learned model.** Gradient-boosted quantile regression of remaining stay and remaining energy from inputs known at 10:00 (time, calendar, station, cars present, price regime, the driver's earlier sessions, a typed plan if recorded in time). For a car plugged in at 07:40 with five earlier sessions on record, the model returns at 10:00 lower quantiles of the hours it will still stay and the kWh it will still take; the offer uses those lower quantiles. It is to be trained in time order on sessions before March 2020, validated by pinball loss and coverage, and benchmarked against the Kaplan–Meier quantile given the time already plugged in, a stratified table by plug-in hour, each driver's own history, the mixture predictor of Lee, Li and Low (2019) and the typed plan at face value.
-- **The offer.** The structure-preserving linear programme of the 2024 paper (its programme (24)) fits a shifted, scaled base set inside the sum of the per-car sets; the allocation of its Section IV splits any offered profile among the cars by an affine map fixed at 10:00. The conditions are sufficient and conservative, as the paper states. For the charging-only sets used here the exact width of the fleet's cumulative-energy band has a closed form (and the exact aggregate set is a generalised polymatroid, Mukhi, Loho and Abate, 2026), so the gap between the offer and the exact band is reported on development days as the method's slack.
-- **Reliability.** Delivery is checked by replay in two ways. The allocation fixed at 10:00 is checked against what each car actually accepted; this is the primary check, and the one an aggregator could execute. A split chosen with hindsight among the cars actually present, by linear programming, is reported as an upper bound. Nine fixed profiles from the offer are checked, not every profile, and the results say so. The 90%-of-days target is set by a day-level calibration rule (adaptive conformal inference with days as steps, or a split conformal rule on the day's largest error), compared with a union bound across the cars' deadline and energy bounds. What each rule guarantees, and under which assumptions, is stated in `docs/theory.md`. So is the finite-sample theorem of Yan, Parise and Bitar (2022) for chance constraints under drift, with what it would need with days as samples: independent days, a known bound on how far whole-day configurations can drift, and 312 or 1,121 past days at the two settings used there. The record holds 483 weekdays before the change and 182 after it, so the count is met at the first setting and not at the second; the 90% target here rests on the calibration rules, not on that theorem.
-- **Look-ahead, checked by a scramble test.** Current-session features use only what was observable by 10:00; features from other sessions use only sessions that had ended and matured by then; refits see only the past; day-level calibration uses only past days, with each day's score stored on that day under the model then in force. The replay engine is to be the only code that reads unplug times. A scramble test replays the whole pipeline, linear programme included, with every field that becomes known after a cutoff altered, including the later fields of sessions already plugged in at the cutoff, and requires every earlier offer to be identical.
-- **Sealed test data.** Caltech sessions from 1 March 2020 open only once the `analysis-plan` git tag exists; the Jet Propulsion Laboratory site is analysed once, after the settings are frozen. Both periods were looked at while the project was scoped, and the looks are listed in `docs/prior-looks.md`: stay statistics for every Caltech day from March 2020 to September 2021, how often fixed and rolling per-car stay bounds held, a count-based fleet promise fitted in 2019 that held on no 2021 weekday, the day-to-day dispersion of early departures, and stay statistics at JPL. No learned per-car bound, no offer from the inner approximation, no day-level calibration rule and no learned-against-population comparison has been computed on them. The test is a frozen retrospective comparison on eras that were partly explored, and is described as such.
-- **Every output records how it was made.** Each run writes a manifest with the code commit, parameters, package versions and a fingerprint of its input.
+- **The decision.** At 10:00 on each weekday, for the cars plugged in at that moment, a set of fleet charging profiles for 10:00 to 20:00 in 15-minute steps. Nothing after 10:00 is used; arrivals are not forecast.
+- **Per-car sets.** A charging-only case of the generalised battery model of Al Taha, Vincent and Bitar (2024, equation (2)): power between 0 and a cap while plugged in, nothing after a deadline, and cumulative energy after 10:00 at most a ceiling. A learned set uses a deadline no later than the car is predicted to leave and a ceiling no higher than it is predicted to take; whenever every car's two bounds hold, the offered set lies inside the fleet's true set (`docs/theory.md`). Charging nothing is always allowed, so "delivered" means the fleet can follow the profile within caps, deadlines and ceilings, not that each driver is charged.
+- **Per-car models.** Gradient-boosted quantile regression of remaining stay and remaining energy from inputs known at 10:00 (time, calendar, station, cars present, the driver's earlier sessions, a typed plan if recorded in time), refitted monthly on the past 90 days. It is benchmarked against the Kaplan–Meier quantile given the time already plugged in (the population rule), a stratified table by plug-in hour, each driver's own history, the mixture predictor of Lee, Li and Low (2019) and the typed plan at face value.
+- **The offer.** Programme (24) of the 2024 paper fits a shifted, scaled base set inside the sum of the per-car sets, and its Section IV splits any offered profile among the cars by an affine map fixed at 10:00. The conditions are sufficient, not necessary; for these sets the exact band of the fleet's cumulative energy has a closed form, and the gap to it is reported.
+- **Delivery and calibration.** Each day's offer is checked on nine profiles against what the cars actually did: under the allocation fixed at 10:00 (the primary check, the one an aggregator could execute) and under a split chosen with hindsight (an upper bound). One quantile level per day is set from past days by adaptive conformal inference (Gibbs and Candès, 2021) to target delivery on 90% of days, beside a union bound across the cars. What each rule guarantees, and what the finite-sample theorem of Yan, Parise and Bitar (2022) would need with days as samples, is stated in `docs/theory.md`.
+- **No look-ahead.** Only the replay engine reads unplug times. A scramble test alters every field that becomes known after a cutoff, runs the whole pipeline, linear programme included, and requires every earlier offer to be unchanged.
+- **Sealed test data.** Caltech sessions from 1 March 2020 open only once the `analysis-plan` tag exists; JPL is analysed once, with the settings frozen. Every earlier look at these periods is listed in `docs/prior-looks.md`.
+- **Provenance.** Each run writes a manifest with the code commit, parameters, package versions and a fingerprint of its input.
 
-## Quick start
+## How to run
 
 Requires [uv](https://docs.astral.sh/uv/).
 
@@ -42,28 +83,26 @@ uv run pytest
 uv run fleetoffer demo
 ```
 
-The demo is to run the whole pipeline on made-up sessions with known flexibility sets, so the linear programme is checked where the answer is known. It is not a result.
+The demo runs the whole pipeline on made-up fleets with known flexibility sets, so the linear programme is checked where the answer is known. It is not a result.
 
-## Data
-
-Session data come from [Caltech ACN-Data](https://ev.caltech.edu/dataset), available for educational and research use after registration; they are not redistributed here. With an access token in `ACN_API_TOKEN`:
+Session data come from [Caltech ACN-Data](https://ev.caltech.edu/dataset), available for educational and research use after registration; they are not redistributed here. If you use the data, cite Lee, Li and Low (2019). With an access token in `ACN_API_TOKEN`:
 
 ```bash
-uv run fleetoffer fetch caltech    # stored under data/, never committed
-uv run fleetoffer verify caltech   # same data as this repository's fingerprints/caltech.csv?
-uv run fleetoffer percar           # per-car models and baselines, months through August 2019
-uv run fleetoffer checks           # checks D2 to D12 and the offers of every arm, May-August 2019
+uv run fleetoffer fetch caltech        # and jpl; stored under data/, never committed
+uv run fleetoffer verify caltech       # same data as fingerprints/caltech.csv?
+uv run fleetoffer percar               # per-car models and baselines, months through August 2019
+uv run fleetoffer checks               # the checks before the tag, May to August 2019
+uv run fleetoffer levels               # offer size against delivery at every level
+uv run fleetoffer options              # calibration on delivery
+uv run fleetoffer accounting           # where the perfect-knowledge offer goes
+uv run fleetoffer evaluate evaluation  # September 2019 to February 2020; then sealed, jpl
+uv run fleetoffer report               # figures and the results table
+uv run fleetoffer note                 # the note, filled from the tables, printed to PDF
 ```
 
-The energy delivered after 10:00 is not a field of the session record. The per-session time series that would give it failed a quality check fixed before it was fetched (300 sampled sessions: 85% usable against a 95% threshold, median energy error 5.1% against 5%), so it is estimated from each session's recorded energy and charging-done time, and the energy ceiling is approximate. `docs/data.md` describes what is downloaded, the cleaning rules and their counts, the time-series check and the estimate, the sealed periods, and a check of the download against an independent public copy. If you use the data, cite Lee, Li and Low (2019).
+Each command reads what the ones above it wrote. `evaluate` runs only in a clone that holds the `analysis-plan` tag, and `report` needs all three of its runs. `series` and `d1` (the time-series check), `snapshot-check` and `requirements` are described in `docs/data.md` and `docs/theory.md`; `uv run fleetoffer --help` lists every command.
 
-## Closest work
-
-Al Taha, Vincent and Bitar (2024) compute inner approximations of the aggregate flexibility of a fleet whose individual sets are given; Mukhi, Loho and Abate (2026) give the exact aggregate set for this class of sets as a generalised polymatroid. Mukhi, Qu, You and Abate (2025) certify an aggregate set for cars drawn independently from one known distribution and name per-vehicle distributions as a limit of that model; Yan, Parise and Bitar (2022) bound the sample size of a chance-constrained decision when the distribution drifts by a known amount; Gibbs and Candès (2021) keep long-run coverage under arbitrary shift without estimating it. On the prediction side, Lee, Li and Low (2019) predict individual departures on this dataset and Genov and others (2023) forecast session flexibility on it with gradient-boosted trees and mixtures, measuring the effect of driver registration; Huber, Dann and Weinhardt (2020) use per-session quantile forecasts of parking time and energy in charging coordination; Winschermann, Bañol Arias, Hoogsteen and Hurink (2023) measure, at an office car park, what individual averages of energy and dwell time add to a charging strategy, the nearest published answer to the question asked here. Su, Xiang, Liu and Nie (2026) aggregate per-vehicle sets under a modelled chance of early departure within the day, with no learning from each vehicle's history and no change across days.
-
-Three lines of work take the other route or a neighbouring one. Thrän, Mareček, Shorten and Green (2025), Brinkel, Visser, van Sark and AlSkaif (2023), Essayeh and others (2025) and Chen and Hu (2026) forecast fleet-level flexibility boundaries or their parameters directly; Thrän and others write that aggregation avoids predicting individual behaviour. Wang, Wang, Wang and Dabbaghjamanesh (2026) calibrate zone-level charging forecasts with conformalised quantile regression and score a vehicle-to-grid envelope by delivery shortfall, as two separate modules; Wang, Abu-Znad, Du and Sao (2025) learn corrections to an inner-box aggregate from past schedule deviations without scoring delivery in time order; Taheri, Kekatos, Veeramachaneni and Zhang (2022) learn an aggregator's feasible set from labelled feasible and infeasible schedules and approximate it from inside by the shape a market prescribes. Lunde, Damm, Gade and Kazempour (2025) bid an EV fleet under the Danish rule that a reserve must be available with at least 90% probability, the operational form of a 90% target; Zhang, Hu, Munsing, Moura and Song (2019) offer regulation capacity from distributed resources, electric vehicles among them, under a data-driven distributionally robust chance constraint on the service delivered; Li and Li (2024) and Abedrabboh and Al-Fagih (2025) treat uncertain departures with a distributionally robust model and a worst-case model, the second beside re-solving the schedule as cars' availability is revealed. Two 2026 papers whose full text was not available when this was written (Luo, Chen and Zhu; Park and others) describe aggregate-level forecasting coupled to scheduling and robust virtual-battery aggregation; they are listed in the plan as unresolved. None of these builds the aggregate set from learned per-car bounds and scores it by replayed delivery in time order across a change in behaviour; this project does, and compares it with population offers calibrated in the same way.
-
-## Layout
+The energy a car takes after 10:00 is not a field of the session record. The per-session time series that would give it failed a quality check fixed before it was fetched (300 sampled sessions: 85% usable against a 95% threshold, median energy error 5.1% against 5%), so it is estimated from each session's recorded energy and charging-done time, and the energy ceiling is approximate. `docs/data.md` describes what is downloaded, the cleaning rules and their counts, the time-series check and the estimate, and the sealed periods.
 
 ```
 src/fleetoffer/
@@ -98,39 +137,28 @@ src/fleetoffer/
   note.py         the note on the results: every result read from the tables, printed to PDF
   pipeline.py     end-to-end runs with manifests
 tests/            unit tests, including the look-ahead tests (no network needed)
-note/             the note's page, with a named field for each result (`fleetoffer note`)
+note/             the note's page, with a named field for each result
 fingerprints/     SHA-256 of every downloaded month
 docs/             analysis plan, what the tag fixes (registration), data notes, theory with theorem
-                  statements, earlier looks, written predictions, discovery log
+                  statements, earlier looks, written predictions, discovery log, related work
 ```
+
+## Related work
+
+Al Taha, Vincent and Bitar (2024) compute inner approximations of the aggregate flexibility of a fleet whose individual sets are known, and Mukhi, Loho and Abate (2026) give the exact aggregate set for this class of sets as a generalised polymatroid. Mukhi, Qu, You and Abate (2025) certify an aggregate set for cars drawn independently from one known distribution, and Su, Xiang, Liu and Nie (2026) aggregate per-vehicle sets under a modelled chance of early departure. On the prediction side, Lee, Li and Low (2019) predict individual departures on this dataset, Genov and others (2023) forecast session flexibility on it, and Winschermann, Bañol Arias, Hoogsteen and Hurink (2023) measure, at an office car park, what individual averages of energy and dwell time add to a charging strategy, the nearest published answer to the question asked here. Work that forecasts fleet-level flexibility directly, calibrates fleet forecasts, or bids a fleet under a chance constraint is listed in `docs/related-work.md`, with what each paper does. None of the papers listed there builds the aggregate set from learned per-car bounds and scores it by replayed delivery in time order.
 
 ## References
 
 - Al Taha, Vincent and Bitar, "An efficient method for quantifying the aggregate flexibility of plug-in electric vehicle populations", IEEE Transactions on Smart Grid 16(4), 3142–3154, 2025 (online April 2024). doi 10.1109/TSG.2024.3384871. arXiv 2207.07067.
-- Yan, Parise and Bitar, "Data-driven approximations of chance constrained programs in nonstationary environments", IEEE Control Systems Letters 6, 2022. arXiv 2205.03748.
-- Mukhi, Qu, You and Abate, "Robust aggregation of electric vehicle flexibility", HSCC 2025. arXiv 2405.08232.
 - Mukhi, Loho and Abate, "Exact characterization of aggregate flexibility via generalized polymatroids", IEEE Transactions on Smart Grid 17(3), 2131–2142, 2026. doi 10.1109/TSG.2026.3659513.
-- Gibbs and Candès, "Adaptive conformal inference under distribution shift", NeurIPS 2021. arXiv 2106.00170.
-- Thrän, Mareček, Shorten and Green, "Reserve provision from electric vehicles: aggregate boundaries and stochastic model predictive control", IEEE Transactions on Power Systems 40(5), 2025. doi 10.1109/TPWRS.2025.3539863.
-- Zhang, Hu, Munsing, Moura and Song, "Data-driven chance-constrained regulation capacity offering for distributed energy resources", IEEE Transactions on Smart Grid 10(3), 2713–2725, 2019. doi 10.1109/TSG.2018.2809046 (abstract only).
+- Mukhi, Qu, You and Abate, "Robust aggregation of electric vehicle flexibility", HSCC 2025. arXiv 2405.08232.
+- Su, Xiang, Liu and Nie, "An inner approximation aggregation of electric vehicles considering uncertain dynamic characteristics of users", Sustainable Energy, Grids and Networks 47, 2026. doi 10.1016/j.segan.2026.102350.
 - Lee, Li and Low, "ACN-Data: analysis and applications of an open EV charging dataset", ACM e-Energy 2019.
 - Genov, De Cauwer, Van Kriekinge, Coosemans and Messagie, "Forecasting flexibility of charging of electric vehicles: tree and cluster-based methods", Applied Energy 353, 121969, 2023. doi 10.1016/j.apenergy.2023.121969.
-- Huber, Dann and Weinhardt, "Probabilistic forecasts of time and energy flexibility in battery electric vehicle charging", Applied Energy 262, 114525, 2020. doi 10.1016/j.apenergy.2020.114525.
 - Winschermann, Bañol Arias, Hoogsteen and Hurink, "Assessing the value of information for electric vehicle charging strategies at office buildings", Renewable and Sustainable Energy Reviews 185, 113600, 2023. doi 10.1016/j.rser.2023.113600.
-- Su, Xiang, Liu and Nie, "An inner approximation aggregation of electric vehicles considering uncertain dynamic characteristics of users", Sustainable Energy, Grids and Networks 47, 2026. doi 10.1016/j.segan.2026.102350.
-- Brinkel, Visser, van Sark and AlSkaif, "A novel forecasting approach to schedule aggregated electric vehicle charging", Energy and AI 14, 100297, 2023. doi 10.1016/j.egyai.2023.100297.
-- Essayeh, Vilan, Homaee and Vahidinasab, "EV fleet flexibility estimation and forecasting for V2X applications", arXiv 2502.06435, 2025.
-- Wang, Wang, Wang and Dabbaghjamanesh, "Calibrated probabilistic forecasting and measured discharge physics for deliverable electric vehicle flexibility", World Electric Vehicle Journal 17(7), 367, 2026. doi 10.3390/wevj17070367.
-- Wang, Abu-Znad, Du and Sao, "Learning-assisted aggregate flexibility characterization for EV charging stations considering scheduling deviation uncertainty", IEEE ITEC 2025. doi 10.1109/ITEC63604.2025.11098065.
-- Taheri, Kekatos, Veeramachaneni and Zhang, "Data-driven modeling of aggregate flexibility under uncertain and non-convex device models", IEEE Transactions on Smart Grid 13(6), 4572–4582, 2022. doi 10.1109/TSG.2022.3185532 (abstract only).
-- Li and Li, "Distributionally robust evaluation for real-time flexibility of electric vehicles considering uncertain departure behavior and state-of-charge", IEEE Transactions on Smart Grid 15(4), 4288–4291, 2024. doi 10.1109/TSG.2024.3397057 (abstract only).
-- Chen and Hu, "Evaluating and forecasting the aggregate flexibility of large-scale electric vehicle charging and swapping facilities", IEEE Transactions on Transportation Electrification 12(2), 2815–2829, 2026. doi 10.1109/TTE.2026.3655071 (abstract only).
-- Abedrabboh and Al-Fagih, "Cost-effective scheduling and flexibility provision of EV aggregators under departure uncertainty", International Universities Power Engineering Conference (UPEC), 2025. doi 10.1109/UPEC65436.2025.11279874 (abstract only).
-- Lunde, Damm, Gade and Kazempour, "Aggregator of electric vehicles bidding in Nordic FCR-D markets: a chance-constrained program", IEEE Transactions on Power Systems, 2025. doi 10.1109/TPWRS.2025.3558868.
-- Luo, Chen and Zhu, "Coupling flexibility forecasting and day-ahead scheduling for EV aggregators: a frequency-enhanced Transformer approach", SSRN, 2026. doi 10.2139/ssrn.7316943 (abstract only).
-- Park and others, "Robust virtual battery optimization for EV fleet aggregation: operational feasibility in day-ahead and real-time markets", eTransportation, 2026. doi 10.1016/j.etran.2026.100578 (title only).
+- Yan, Parise and Bitar, "Data-driven approximations of chance constrained programs in nonstationary environments", IEEE Control Systems Letters 6, 2022. arXiv 2205.03748.
+- Gibbs and Candès, "Adaptive conformal inference under distribution shift", NeurIPS 2021. arXiv 2106.00170.
 
 ## Licence
 
-Code: MIT. Data: see above.
-
+Code: MIT. Data: see "How to run".
