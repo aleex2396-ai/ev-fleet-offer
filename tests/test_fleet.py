@@ -3,10 +3,10 @@ import pandas as pd
 import pytest
 from helpers import FleetOracle, FleetPast, FleetPeekEnergy
 
-from fleetoffer.checks import LookaheadError, check_no_lookahead_days
 from fleetoffer.data import to_hours
 from fleetoffer.engine import MORNING, Oracle, energy_in_window, fleet_replay, training_base_set
 from fleetoffer.interface import FleetRule
+from fleetoffer.lookahead import LookaheadError, check_no_lookahead_days
 from fleetoffer.offer import BaseSet
 from fleetoffer.synthetic import Regime, make_sessions
 

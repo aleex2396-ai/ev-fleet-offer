@@ -1,5 +1,5 @@
 """The full report (`report/README.md`): every result in it is read here from the result
-tables, the template (`report.md` beside this file) is filled, and the two figures it shows are
+tables, the template (`report.md` beside this file) is filled, and the figures it shows are
 copied beside it.
 
 Each function below says which table its numbers come from. The settings, and the numbers of
@@ -17,14 +17,14 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from fleetoffer import daylevel, evaluation, figures, levels
+from fleetoffer import daylevel, evaluation, figures, levels, percar
 from fleetoffer.devchecks import SELECTION_START
 from fleetoffer.quantiles import LEVELS
 
 TEMPLATE = Path(__file__).with_name("report.md")
 FIELD = re.compile(r"\{\{(\w+)\}\}")
 HEADER = (
-    "<!-- Written by `uv run fleetoffer note` from src/fleetoffer/report.md, with every number"
+    "<!-- Written by `uv run fleetoffer report` from src/fleetoffer/report.md, with every number"
     " read from the result tables. Edit the template, not this page. -->\n"
 )
 MODELS = {"4": ("learned", 0), "5": ("population", 1), "6": ("stratified", 2)}
@@ -102,22 +102,26 @@ def rule_levels(checks_dir: Path) -> dict[str, float]:
 
 
 # The figures the page shows, as {name on the page: (source, file)}: "report" is the folder
-# `fleetoffer report` writes, "here" the zero-ceiling figure drawn below.
+# `run_report` writes, "here" the zero-ceiling figure drawn below.
 FIGURES = {
-    "figure-1.png": ("report", "figure3-average-bare.png"),
-    "figure-2.png": ("here", "zero-ceilings-bare.png"),
+    "figure-1.png": ("report", "figure2-bare.png"),
+    "figure-2.png": ("report", "figure3-average-bare.png"),
+    "figure-3.png": ("here", "zero-ceilings-bare.png"),
+    "figure-4.png": ("report", "figure1.png"),
 }
 
 
-def build(results: Path, out: Path, *, rehearsal: bool = False) -> dict[str, Path]:
+def build(results: Path, out: Path, *, rehearsal: bool = False, tables: Path | None = None) -> dict:
     """Fill the report from `results` (the folders the other commands write) into `out`: the
-    page (`README.md`) and the figures it shows."""
+    page (`README.md`) and the figures it shows; returns the page's path and its numbers.
+    `tables` is the folder of figures and the results table that `fleetoffer report` writes
+    first (by default under `results`)."""
     results, out = Path(results), Path(out)
     out.mkdir(parents=True, exist_ok=True)
     numbers = development(results / "levels", results / "checks")
     reached = rule_levels(results / "checks")
     numbers |= {f"level_{k.split()[0]}": pct(v, 2) for k, v in reached.items()}
-    report = results / ("report-rehearsal" if rehearsal else "report")
+    report = Path(tables) if tables else results / ("report-rehearsal" if rehearsal else "report")
     numbers |= later(results, report, reached, numbers, rehearsal=rehearsal)
     numbers |= {"title": TITLE, "author": AUTHOR}
     with tempfile.TemporaryDirectory() as here:
@@ -127,7 +131,7 @@ def build(results: Path, out: Path, *, rehearsal: bool = False) -> dict[str, Pat
             shutil.copy(folders[source] / file, out / name)
     written = out / "README.md"
     written.write_text(page(TEMPLATE.read_text(), numbers))
-    return {"page": written}
+    return {"page": written, "numbers": numbers}
 
 
 ACCOUNTING_ROWS = {
@@ -546,6 +550,175 @@ def aci_bounds(folder: Path, start: pd.Timestamp | None) -> dict[str, float]:
     return out
 
 
+ADAPTIVE_ARMS = ("4", "5", "6", "4d", "5d", "6d")
+
+
+def late_outcomes(folder: Path, start: pd.Timestamp | None) -> dict[str, float]:
+    """For the adaptive day-level arms of a run, on its scored weekdays: the share whose outcome
+    was known before the rule's next decision, the most scored days pending at one decision, and
+    the bound on the share of failed days with that many pending (`docs/theory.md`, "Late
+    outcomes": 0.9 gamma becomes 0.9 gamma times one more than the days pending at once)."""
+    folder = Path(folder)
+    days = pd.read_csv(folder / "days.csv.gz", dtype={"arm": str}, low_memory=False)
+    logs = pd.read_csv(folder / "logs.csv.gz", dtype={"arm": str}, low_memory=False)
+    for frame in (days, logs):
+        frame["decision_time"] = pd.to_datetime(frame["decision_time"], utc=True)
+    logs["revealed_at"] = pd.to_datetime(logs["revealed_at"], utc=True)
+    known, pending, bound = [], [], []
+    gamma, target = daylevel.ACI_GAMMA, daylevel.TARGET_MISS
+    for arm in ADAPTIVE_ARMS:
+        log = logs[logs["arm"] == arm].sort_values("decision_time").reset_index(drop=True)
+        scored = evaluation.scored_days(days[days["arm"] == arm], start)["decision_time"]
+        mine = log[log["decision_time"].isin(scored)]
+        if mine.empty:
+            continue
+        following = log["decision_time"].shift(-1).loc[mine.index]
+        has_next = following.notna()
+        known.append(float((mine["revealed_at"] <= following)[has_next].mean()))
+        counted = log[log["scored"].astype(str) == "True"]
+        at_once = max(
+            int(((counted["decision_time"] < t) & (counted["revealed_at"] > t)).sum())
+            for t in mine["decision_time"]
+        )
+        pending.append(at_once)
+        first = float(mine["miss_at_decision"].iloc[0])
+        bound.append(
+            target + (first + (1 - target) * gamma * (1 + at_once)) / (gamma * len(scored))
+        )
+    return {
+        "known_min": min(known),
+        "known_max": max(known),
+        "pending": max(pending),
+        "bound_min": min(bound),
+        "bound_max": max(bound),
+    }
+
+
+# Section 4 of the analysis plan: pinball loss and coverage of each per-car model, known and
+# anonymous drivers apart, on the model-selection months (`fleetoffer percar`), and the learned
+# model against the population rule on the frozen evaluation's car-days.
+PERCAR_ROWS = {
+    "gbdt": "Learned (boosted trees)",
+    "net": "Small network",
+    "linear": "Linear quantile regression",
+    "driver": "Each driver's own past",
+    "stratified": "Stratified table",
+    "mixture": "Mixture of Lee, Li and Low",
+    "population": "Population rule",
+}
+SELECTION_PERIOD = "model selection, May-Aug 2019"
+DRIVER_GROUPS = ("all", "known", "anonymous")
+
+
+def frozen_percar(folder: Path, start: pd.Timestamp | None) -> pd.DataFrame:
+    """Per-car scores of the learned model and the population rule on a run's car-days from
+    `start` (its predictions files), as `percar.score_table` gives them."""
+    folder = Path(folder)
+    p4 = pd.read_csv(folder / "predictions_4.csv.gz", low_memory=False)
+    p5 = pd.read_csv(folder / "predictions_5.csv.gz", low_memory=False)
+    keys = ["decision_time", "session_id"]
+    own = [c for c in p5.columns if c.startswith("population:")]
+    frame = p4.merge(p5[keys + own], on=keys, validate="1:1")
+    frame["decision_time"] = pd.to_datetime(frame["decision_time"], utc=True)
+    if start is not None:
+        frame = frame[frame["decision_time"] >= start]
+    return percar.score_table(frame.assign(period="frozen"), ["gbdt", "population"])
+
+
+def percar_numbers(scores: pd.DataFrame, frozen: pd.DataFrame) -> dict[str, str]:
+    """Table 3 and the per-car numbers the text quotes: mean pinball loss over the 16 levels and
+    the share of stay bounds missed at level 0.10, on the model-selection months (`scores`, from
+    `fleetoffer percar`) and on the frozen evaluation (`frozen`, from `frozen_percar`)."""
+    sel = scores[scores["period"] == SELECTION_PERIOD]
+    loss = percar.summary_table(sel).set_index(["drivers", "model", "target"])["pinball"]
+    later = percar.summary_table(frozen).set_index(["drivers", "model", "target"])["pinball"]
+
+    def missed(frame: pd.DataFrame, model: str) -> float | None:
+        rows = frame[
+            np.isclose(frame["level"], 0.10)
+            & (frame["drivers"] == "all")
+            & (frame["model"] == model)
+            & (frame["target"] == "stay")
+        ]
+        return float(rows["miss_rate"].iloc[0]) if len(rows) else None
+
+    def num(series: pd.Series, key: tuple) -> str:
+        return f"{series[key]:.3f}" if key in series.index else "–"
+
+    lines = [
+        "| Model | Stay (h) | Energy (kWh) | Stay missed at 0.10 | Sep 2019–Feb 2020 |",
+        "|---|---|---|---|---|",
+    ]
+    for model, label in PERCAR_ROWS.items():
+        cells = []
+        for target in ("stay", "energy"):
+            values = [num(loss, (g, model, target)) for g in DRIVER_GROUPS]
+            cells.append("–" if set(values) == {"–"} else " / ".join(values))
+        share = missed(sel, model)
+        cells.append(pct(share) if share is not None else "–")
+        if ("all", model, "stay") in later.index:
+            cells.append(
+                f"{num(later, ('all', model, 'stay'))} / {num(later, ('all', model, 'energy'))}"
+            )
+        else:
+            cells.append("–")
+        lines.append(f"| {label} | " + " | ".join(cells) + " |")
+
+    out = {"table_percar": "\n".join(lines)}
+    for model, key in (
+        ("gbdt", "4"),
+        ("population", "5"),
+        ("driver", "driver"),
+        ("stratified", "strat"),
+    ):
+        for target in ("stay", "energy"):
+            out[f"pc_{target}_{key}"] = num(loss, ("all", model, target))
+    for model, key in (("gbdt", "4"), ("population", "5")):
+        out[f"pc_miss_{key}"] = pct(missed(sel, model))
+        out[f"ev_pc_miss_{key}"] = pct(missed(frozen, model))
+        for target in ("stay", "energy"):
+            out[f"ev_pc_{target}_{key}"] = num(later, ("all", model, target))
+    days = sel[(sel["model"] == "gbdt") & (sel["drivers"] == "all")]["car_days"]
+    out["pc_car_days"] = f"{int(days.iloc[0]):,}"
+    days = frozen[(frozen["model"] == "gbdt") & (frozen["drivers"] == "all")]["car_days"]
+    out["ev_pc_car_days"] = f"{int(days.iloc[0]):,}"
+    out["pc_baseline_sentence"] = baseline_sentence(loss)
+    for model, key in (("gbdt", "4"), ("driver", "driver")):
+        out[f"pc_energy_{key}_known"] = num(loss, ("known", model, "energy"))
+    return out
+
+
+def baseline_sentence(loss: pd.Series) -> str:
+    """What Section 4 of the plan requires the results to say: for each target, whether the
+    learned model beats each driver's own past and the stratified table on mean pinball loss
+    (all drivers, model-selection months). A loss within 1% of a baseline's counts as level."""
+    names = {"driver": "each driver's own past", "stratified": "the stratified table"}
+    unit = {"stay": "h", "energy": "kWh"}
+    failed: dict[str, list[tuple[str, float, float]]] = {}
+    for target in ("stay", "energy"):
+        mine = loss[("all", "gbdt", target)]
+        for model, name in names.items():
+            other = loss[("all", model, target)]
+            if mine > 0.99 * other:
+                failed.setdefault(target, []).append((name, mine, other))
+    if not failed:
+        return (
+            "The trees beat each driver's own past and the stratified table on both targets, "
+            "by more than 1% of the mean loss."
+        )
+    parts = []
+    for target, rows in failed.items():
+        against = " or ".join(
+            f"{n} ({a:.3f} against {b:.3f} {unit[target]}, within 1%)" for n, a, b in rows
+        )
+        given = " and ".join(n for n, _, _ in rows)
+        parts.append(
+            f"on {target} the trees do not beat {against}, so for {target} the learned "
+            f"model's gain over the population rule is what {given} already gives"
+        )
+    return "By the plan's own test (its Section 4), " + "; and ".join(parts) + "."
+
+
 def sealed_composition(folder: Path, start: pd.Timestamp | None) -> dict[str, str]:
     """How the sealed months' scored weekdays split around the closure: those in 2020 (before
     it) and those from the reopening year on, from the perfect-knowledge arm's days."""
@@ -707,6 +880,24 @@ def later(
         results / f"evaluate-{prefix}evaluation", evaluation.OFFERS_FROM[f"{prefix}evaluation"]
     )
     out["ev_aci_min"], out["ev_aci_max"] = pct(min(bounds.values())), pct(max(bounds.values()))
+    late = late_outcomes(
+        results / f"evaluate-{prefix}evaluation", evaluation.OFFERS_FROM[f"{prefix}evaluation"]
+    )
+    out["ev_known_next"] = (
+        pct(late["known_min"], 0)
+        if round(late["known_min"], 2) == round(late["known_max"], 2)
+        else f"{pct(late['known_min'], 0)} to {pct(late['known_max'], 0)}"
+    )
+    out["ev_pending"] = str(late["pending"])
+    out["ev_aci_late_min"], out["ev_aci_late_max"] = (
+        pct(late["bound_min"]),
+        pct(late["bound_max"]),
+    )
+    scores = pd.read_csv(results / "percar" / "scores.csv")
+    frozen_scores = frozen_percar(
+        results / f"evaluate-{prefix}evaluation", evaluation.OFFERS_FROM[f"{prefix}evaluation"]
+    )
+    out |= percar_numbers(scores, frozen_scores)
     out |= sealed_composition(
         results / f"evaluate-{prefix}sealed", evaluation.OFFERS_FROM[f"{prefix}sealed"]
     )

@@ -11,9 +11,9 @@ from helpers import (
 )
 
 import fleetoffer.models as models_module
-from fleetoffer.checks import LookaheadError, check_no_lookahead, scramble_future
 from fleetoffer.engine import Daily
 from fleetoffer.interface import Rule
+from fleetoffer.lookahead import LookaheadError, check_no_lookahead, scramble_future
 from fleetoffer.models import FrozenQuantile, RollingQuantile
 from fleetoffer.synthetic import Regime, make_sessions
 

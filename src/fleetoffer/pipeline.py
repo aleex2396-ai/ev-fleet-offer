@@ -1121,15 +1121,15 @@ def main(argv: list[str] | None = None) -> int:
     ev.add_argument("--out", type=Path, default=None)
     ev.add_argument("--workers", type=int, default=10)
 
-    rep = commands.add_parser("report", help="Figures 1 to 4 and the results table")
+    rep = commands.add_parser(
+        "report",
+        help="the figures and the results table (results/report), then the full report "
+        "(report/), every number filled from the tables",
+    )
     rep.add_argument("--results", type=Path, default=Path("results"))
-    rep.add_argument("--out", type=Path, default=None)
+    rep.add_argument("--out", type=Path, default=None, help="folder for the figures and tables")
+    rep.add_argument("--page", type=Path, default=None, help="folder for the report page")
     rep.add_argument("--rehearsal", action="store_true")
-
-    nt = commands.add_parser("note", help="the full report in report/, filled from the tables")
-    nt.add_argument("--results", type=Path, default=Path("results"))
-    nt.add_argument("--out", type=Path, default=None)
-    nt.add_argument("--rehearsal", action="store_true")
 
     commands.add_parser(
         "requirements",
@@ -1222,11 +1222,11 @@ def main(argv: list[str] | None = None) -> int:
         out = args.out or args.results / folder
         report = run_report(args.results, out, rehearsal=args.rehearsal)
         print(f"wrote {len(report['figures'])} figures and the results table to {out}")
-    elif args.command == "note":
         from fleetoffer import note
 
         default = args.results / "note-rehearsal" if args.rehearsal else Path("report")
-        built = note.build(args.results, args.out or default, rehearsal=args.rehearsal)
+        page = args.page or default
+        built = note.build(args.results, page, rehearsal=args.rehearsal, tables=out)
         print(f"wrote {built['page']} and its figures")
     elif args.command == "requirements":
         print(calibrate.requirements_table().to_string(index=False))

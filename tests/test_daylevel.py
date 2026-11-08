@@ -3,7 +3,6 @@ import pandas as pd
 import pytest
 
 from fleetoffer.baselines import Population
-from fleetoffer.checks import check_no_lookahead_days
 from fleetoffer.daylevel import (
     DELIVERY_LEVELS,
     GRID,
@@ -19,6 +18,7 @@ from fleetoffer.daylevel import (
     supported,
 )
 from fleetoffer.engine import fleet_replay
+from fleetoffer.lookahead import check_no_lookahead_days
 from fleetoffer.offer import STEP_H, STEPS, BaseSet, Fleet, solve, solve_segment
 from fleetoffer.quantiles import GBDT, LEVELS, PerCarRule, at_level
 from fleetoffer.synthetic import Regime, make_sessions, with_app_entries

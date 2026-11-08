@@ -13,7 +13,8 @@ quantiles.py    per-car quantile models (boosted trees, a small network, linear)
                 monthly refits inside the engine
 baselines.py    population rule, stratified table, each driver's own past, the mixture
                 predictor of Lee, Li and Low, the typed plan
-models.py       Kaplan-Meier quantiles and the earlier per-car stay rules
+models.py       Kaplan-Meier quantiles of remaining stay, and two simple stay rules the demo
+                runs
 percar.py       the per-car layer on development months: settings search, refits, scores
 offer.py        per-car sets, the inner-approximation programme, the affine allocation,
                 the nine-profile delivery checks and the one-dimensional fallback
@@ -28,10 +29,11 @@ evaluation.py   the runs after the tag: frozen evaluation, sealed months, both J
                 sensitivities and the hypotheses' readings
 h0.json         the base set of every run after the tag, committed and loaded
 resample.py     uncertainty by resampling whole weeks
-checks.py       the look-ahead scramble test, per car and per day
+lookahead.py    the look-ahead scramble test, per car and per day
 synthetic.py    made-up fleets with known flexibility sets
 figures.py      figures, each drawn from a table also written to disk
-note.py         the full report: every result read from the tables into report.md
+note.py         the full report: every result read from the tables into report.md, and the
+                per-car scores and late-outcome counts it quotes
 report.md       the report's text, with a named field for each result
 pipeline.py     end-to-end runs with manifests, and the commands
 ```

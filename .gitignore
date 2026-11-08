@@ -1,4 +1,5 @@
-# Data and outputs are rebuilt from scripts, never committed.
+# Data and run outputs are rebuilt from scripts, never committed; report/ is the one
+# generated folder that is (the page and its figures).
 data/
 results/
 

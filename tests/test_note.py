@@ -23,7 +23,7 @@ def test_the_template_names_only_plain_placeholders():
 
 def test_the_page_says_where_it_comes_from_and_drops_the_template_comment():
     out = note.page("<!-- edit me -->\n\n# {{title}}\n", {"title": "T"})
-    assert out.startswith("<!-- Written by `uv run fleetoffer note`")
+    assert out.startswith("<!-- Written by `uv run fleetoffer report`")
     assert "edit me" not in out and out.endswith("# T\n")
 
 
@@ -271,3 +271,57 @@ def test_the_order_sentence_names_where_the_models_change_places():
     assert "56% and 21%; 74% and 32%, in the order" in text
     assert text.endswith("the order differs in the sealed months.")
     assert note.model_order_sentence(pd.DataFrame(rows[:0], columns=list(rows[0]))) == ""
+
+
+def test_the_baseline_sentence_says_when_the_trees_only_tie_a_baseline():
+    def loss(stay: dict, energy: dict) -> pd.Series:
+        rows = {("all", m, "stay"): v for m, v in stay.items()}
+        rows |= {("all", m, "energy"): v for m, v in energy.items()}
+        return pd.Series(rows)
+
+    clear = loss(
+        {"gbdt": 0.4, "driver": 0.5, "stratified": 0.5},
+        {"gbdt": 0.6, "driver": 0.7, "stratified": 1.0},
+    )
+    assert note.baseline_sentence(clear).startswith("The trees beat")
+    tied = loss(
+        {"gbdt": 0.4, "driver": 0.5, "stratified": 0.5},
+        {"gbdt": 0.683, "driver": 0.684, "stratified": 1.0},
+    )
+    text = note.baseline_sentence(tied)
+    assert "on energy the trees do not beat each driver's own past (0.683 against 0.684 kWh" in text
+    assert "stay" not in text and "stratified" not in text
+
+
+def test_late_outcomes_count_days_known_before_the_next_decision(tmp_path):
+    t = pd.date_range("2019-09-02 17:00", periods=4, freq="D", tz="UTC")
+    days = pd.DataFrame({"decision_time": t, "arm": "4", "size_kwh": 1.0, "cars_with_energy": 9})
+    revealed = [
+        t[0] + pd.Timedelta(hours=10),
+        t[3] + pd.Timedelta(hours=1),
+        t[2] + pd.Timedelta(hours=10),
+        t[3] + pd.Timedelta(hours=10),
+    ]
+    logs = pd.DataFrame(
+        {
+            "decision_time": t,
+            "arm": "4",
+            "revealed_at": revealed,
+            "scored": True,
+            "miss_at_decision": 0.10,
+        }
+    )
+    days.to_csv(tmp_path / "days.csv.gz", index=False)
+    logs.to_csv(tmp_path / "logs.csv.gz", index=False)
+    late = note.late_outcomes(tmp_path, None)
+    # day 2 is revealed after days 3 and 4 were decided: known on 2 of the 3 days with a next
+    assert late["known_min"] == pytest.approx(2 / 3)
+    assert late["pending"] == 1  # at day 4's decision only day 2 is still open
+    assert late["bound_min"] == pytest.approx(0.10 + (0.10 + 0.9 * 0.03 * 2) / (0.03 * 4))
+
+
+def test_monthly_lines_break_at_a_gap():
+    x = pd.Series(
+        pd.to_datetime(["2020-01-15", "2020-02-15", "2020-03-15", "2021-08-15", "2021-09-15"])
+    )
+    assert figures._runs(x) == [slice(0, 3), slice(3, 5)]

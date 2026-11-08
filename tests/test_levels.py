@@ -4,9 +4,9 @@ import pytest
 
 from fleetoffer import levels, options
 from fleetoffer.baselines import Population
-from fleetoffer.checks import check_no_lookahead_days
 from fleetoffer.daylevel import DeliveryCalibrated, LevelSweep
 from fleetoffer.engine import fleet_replay, training_base_set
+from fleetoffer.lookahead import check_no_lookahead_days
 from fleetoffer.offer import BaseSet, solve, solve_segment
 from fleetoffer.quantiles import GBDT, PerCarRule
 from fleetoffer.synthetic import Regime, make_sessions, with_app_entries

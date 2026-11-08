@@ -5,9 +5,9 @@ from scipy.stats import norm
 from sklearn.mixture import GaussianMixture
 
 from fleetoffer.baselines import DriverPast, Mixture, Population, Stratified, TypedPlan
-from fleetoffer.checks import check_no_lookahead_days
 from fleetoffer.engine import fleet_replay
 from fleetoffer.features import NUMERIC
+from fleetoffer.lookahead import check_no_lookahead_days
 from fleetoffer.quantiles import (
     GBDT,
     LEVELS,

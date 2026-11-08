@@ -180,6 +180,14 @@ def bare(path: Path) -> Path:
     return path.with_name(f"{path.stem}-bare{path.suffix}")
 
 
+def _runs(x: pd.Series, gap_days: int = 45) -> list[slice]:
+    """Stretches of consecutive months: a line is not drawn across a gap of more than
+    `gap_days` (the months with no scored weekday, such as the campus closure)."""
+    x = pd.Series(pd.to_datetime(list(x)))
+    breaks = [0, *(x.diff().dt.days > gap_days).to_numpy().nonzero()[0], len(x)]
+    return [slice(a, b) for a, b in zip(breaks[:-1], breaks[1:], strict=True) if b > a]
+
+
 def plot_offers_monthly(
     monthly: pd.DataFrame,
     path: Path,
@@ -201,10 +209,14 @@ def plot_offers_monthly(
         m = monthly[monthly["arm"] == arm].sort_values("month")
         if m.empty:
             continue
-        x = pd.PeriodIndex(m["month"], freq="M").to_timestamp() + pd.Timedelta(days=14)
+        x = pd.Series(pd.PeriodIndex(m["month"], freq="M").to_timestamp())
+        x = x + pd.Timedelta(days=14)
+        m = m.reset_index(drop=True)
         line = {"color": SERIES[colour], "ls": style, "lw": 1.5, "marker": "o", "ms": 2.5}
-        top.plot(x, 100 * m["fixed_delivered"], label=label, **line)
-        bottom.plot(x, m["size_mean_kwh"], label=label, **line)
+        for k, run in enumerate(_runs(x)):
+            name = label if k == 0 else None
+            top.plot(x.iloc[run], 100 * m["fixed_delivered"].iloc[run], label=name, **line)
+            bottom.plot(x.iloc[run], m["size_mean_kwh"].iloc[run], label=name, **line)
         shown.extend(x)
     top.axhline(100 * target, color=INK_2, lw=0.9, zorder=1)
     top.set_ylabel("days delivered (%)", color=INK_2, fontsize=9)
@@ -214,7 +226,8 @@ def plot_offers_monthly(
     for ax in (top, bottom):
         _quiet_axes(ax)
     _month_axis(bottom, shown)
-    bottom.legend(loc="upper left", frameon=False, fontsize=7.5, labelcolor=INK_2)
+    # the key sits in the delivery panel's empty lower half, clear of every line
+    top.legend(loc="lower left", frameon=False, fontsize=7.5, labelcolor=INK_2, ncol=2)
     return _finish(fig, path, title, note)
 
 
@@ -248,25 +261,29 @@ def plot_frontier(
             m = monthly[monthly["arm"] == arm].sort_values("month")
             if m.empty:
                 continue
-            x = pd.PeriodIndex(m["month"], freq="M").to_timestamp() + pd.Timedelta(days=14)
-            ax.plot(
-                x,
-                100 * m["fixed_delivered"],
-                color=SERIES[colour],
-                ls=style,
-                lw=1.3,
-                marker="o",
-                ms=2.5,
-            )
-            ax.fill_between(
-                x,
-                100 * m["fixed_delivered_low"],
-                100 * m["fixed_delivered_high"],
-                color=SERIES[colour],
-                alpha=0.15,
-                lw=0,
-                label=label,
-            )
+            x = pd.Series(pd.PeriodIndex(m["month"], freq="M").to_timestamp())
+            x = x + pd.Timedelta(days=14)
+            m = m.reset_index(drop=True)
+            for k, run in enumerate(_runs(x)):
+                part = m.iloc[run]
+                ax.plot(
+                    x.iloc[run],
+                    100 * part["fixed_delivered"],
+                    color=SERIES[colour],
+                    ls=style,
+                    lw=1.3,
+                    marker="o",
+                    ms=2.5,
+                )
+                ax.fill_between(
+                    x.iloc[run],
+                    100 * part["fixed_delivered_low"],
+                    100 * part["fixed_delivered_high"],
+                    color=SERIES[colour],
+                    alpha=0.15,
+                    lw=0,
+                    label=label if k == 0 else None,
+                )
         ax.axhline(100 * target, color=INK_2, lw=0.8)
         ax.set_ylim(0, 102)
         ax.set_title("days delivered by month, 95% week-block interval", fontsize=9, loc="left")
