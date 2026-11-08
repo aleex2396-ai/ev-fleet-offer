@@ -161,7 +161,8 @@ Write Fᵢ(e) = P(Eᵢ ≤ e | Xᵢ) and πᵢ = Fᵢ(0) = P(Eᵢ = 0 | Xᵢ), t
 at 10:00, that the car takes nothing more. Its lower bound at level q is the q-quantile
 êᵢ(q) = inf{e ≥ 0 : Fᵢ(e) ≥ q}.
 
-**Proposition.** êᵢ(q) = 0 if and only if πᵢ ≥ q.
+**Remark** (registered as a proposition, `docs/registration.md`). êᵢ(q) = 0 if and only if
+πᵢ ≥ q.
 
 *Proof.* If πᵢ ≥ q, then 0 belongs to the set {e : Fᵢ(e) ≥ q}, and Eᵢ ≥ 0, so êᵢ(q) = 0.
 If πᵢ < q, then Fᵢ(0) < q and Fᵢ is right-continuous, so Fᵢ(ε) < q for some ε > 0; every e in
@@ -169,12 +170,12 @@ the set is then larger than ε, and êᵢ(q) ≥ ε > 0. ∎
 
 **How it applies to the rules here.** The population and stratified rules give empirical
 quantiles of past sessions (`numpy.quantile` with the inverted distribution function, which is
-the definition above), so on the grid of levels the proposition holds exactly with πᵢ the
+the definition above), so on the grid of levels the remark holds exactly with πᵢ the
 share of the car's reference sessions that took nothing. Off the grid a bound is interpolated
 linearly between the neighbouring grid levels (and is 0 below the lowest, 0.002), so at a level
 between two grid levels the ceiling is zero exactly when the reference share is at least the
 upper of the two. The boosted trees estimate the conditional quantile by pinball loss, and
-the proposition holds for them only as far as their estimate is the conditional quantile. The
+the remark holds for them only as far as their estimate is the conditional quantile. The
 same argument applies to the deadline: the bound in whole steps is zero when the chance of
 leaving within the first 15 minutes is at least q (up to a boundary case at exactly 15
 minutes).
@@ -202,7 +203,7 @@ perfect-knowledge yardstick for it.
 
 **How it is checked.** In the level sweep, for each model, offer form and level: the share of
 cars given a zero ceiling, also among the cars that did take energy, beside the offer size and
-its delivery; and the same with the empty cars known. The proposition predicts a zero-ceiling
+its delivery; and the same with the empty cars known. The remark predicts a zero-ceiling
 share that is large at the small levels the day-level rules reach and falls as the level rises,
 and a much smaller share once the empty cars are known. It does not predict how much of the
 offer the diagnostic recovers: if knowing the empty cars leaves the offer at matched delivery

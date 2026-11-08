@@ -8,16 +8,28 @@ from fleetoffer import figures, note
 
 
 def test_a_placeholder_without_a_number_is_an_error():
-    assert note.fill("size ${size} kWh", {"size": "1.5"}) == "size 1.5 kWh"
+    assert note.fill("size {{size}} kWh", {"size": "1.5"}) == "size 1.5 kWh"
     with pytest.raises(KeyError):
-        note.fill("size ${size} kWh, delivered ${rate}", {"size": "1.5"})
+        note.fill("size {{size}} kWh, delivered {{rate}}", {"size": "1.5"})
 
 
 def test_the_template_names_only_plain_placeholders():
     text = note.TEMPLATE.read_text()
-    names = re.findall(r"\$\{([^}]*)\}", text)
+    names = note.FIELD.findall(text)
     assert names and all(re.fullmatch(r"[a-z_0-9]+", n) for n in names)
-    assert "$" not in re.sub(r"\$\{[a-z_0-9]+\}", "", text)
+    rest = note.FIELD.sub("", text)
+    assert "{{" not in rest and "}}" not in rest
+
+
+def test_the_page_says_where_it_comes_from_and_drops_the_template_comment():
+    out = note.page("<!-- edit me -->\n\n# {{title}}\n", {"title": "T"})
+    assert out.startswith("<!-- Written by `uv run fleetoffer note`")
+    assert "edit me" not in out and out.endswith("# T\n")
+
+
+def test_every_figure_the_template_shows_is_copied():
+    shown = set(re.findall(r"\]\(([\w-]+\.png)\)", note.TEMPLATE.read_text()))
+    assert shown == set(note.FIGURES)
 
 
 def test_the_zero_ceiling_figure_reads_both_runs_of_each_model(tmp_path):
@@ -45,7 +57,7 @@ def test_the_zero_ceiling_figure_reads_both_runs_of_each_model(tmp_path):
         title="test",
     )
     assert path.exists() and path.stat().st_size > 0
-    assert figures.bare(path).exists()  # the version without heading or note, for the note
+    assert figures.bare(path).exists()  # the version without heading or note, for the report
 
 
 def test_the_accounting_gives_the_registered_and_the_calibrated_rule_a_row_each():
@@ -149,10 +161,10 @@ def test_the_accounting_table_has_a_dash_where_a_period_has_no_step():
                 }
                 for m in ("4", "5", "6")
             ]
-    html = note.accounting_table(pd.DataFrame(rows))
-    forecasts = next(line for line in html.splitlines() if "Forecasts" in line)
-    assert forecasts.count("<td>0</td>") == 12 and forecasts.count("<td>–</td>") == 3
-    assert "40.0 (40%)" in html
+    table = note.accounting_table(pd.DataFrame(rows))
+    forecasts = next(line for line in table.splitlines() if "Forecasts" in line)
+    assert forecasts.count("| 0 / 0 / 0 ") == 4 and forecasts.endswith("| – |")
+    assert "40.0 (40%)" in table
 
 
 def test_offer_days_counts_scored_days_above_the_zero_line():

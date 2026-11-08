@@ -1,6 +1,6 @@
-"""The note on the results (`note/note.html`): every result in it is read here from the result
-tables, the template is filled, and the page is printed to PDF with a headless Chrome if one
-is installed (otherwise the filled page is written alone and can be printed from any browser).
+"""The full report (`report/README.md`): every result in it is read here from the result
+tables, the template (`report.md` beside this file) is filled, and the two figures it shows are
+copied beside it.
 
 Each function below says which table its numbers come from. The settings, and the numbers of
 the checks made before the tag that `docs/` already states, are typed in the template.
@@ -9,10 +9,9 @@ the checks made before the tag that `docs/` already states, are typed in the tem
 from __future__ import annotations
 
 import json
-import os
+import re
 import shutil
-import string
-import subprocess
+import tempfile
 from pathlib import Path
 
 import numpy as np
@@ -22,9 +21,12 @@ from fleetoffer import daylevel, evaluation, figures, levels
 from fleetoffer.devchecks import SELECTION_START
 from fleetoffer.quantiles import LEVELS
 
-TEMPLATE = Path(__file__).parents[2] / "note" / "note.html"
-CHROME = "FLEETOFFER_CHROME"  # path of a Chrome or Chromium binary, if not the default below
-DEFAULT_CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+TEMPLATE = Path(__file__).with_name("report.md")
+FIELD = re.compile(r"\{\{(\w+)\}\}")
+HEADER = (
+    "<!-- Written by `uv run fleetoffer note` from src/fleetoffer/report.md, with every number"
+    " read from the result tables. Edit the template, not this page. -->\n"
+)
 MODELS = {"4": ("learned", 0), "5": ("population", 1), "6": ("stratified", 2)}
 TITLE = "Fleet Charging Offers from Forecast Per-Car Sets: Where the Flexibility Is Lost"
 AUTHOR = "Weixuan (Alex) Lu"
@@ -65,29 +67,18 @@ def zero_ceiling_figure(levels_dir: Path, out: Path, reached: dict[str, float]) 
 
 
 def fill(template: str, numbers: dict[str, str]) -> str:
-    """The template with every placeholder replaced; a placeholder without a number is an
-    error, so no unfilled field reaches the page."""
-    return string.Template(template).substitute(numbers)
+    """The template with every field in double braces replaced; a field without a number is
+    an error, so no unfilled field reaches the page."""
+    return FIELD.sub(lambda m: str(numbers[m.group(1)]), template)
 
 
-def print_pdf(html: Path, pdf: Path) -> Path | None:
-    """Print `html` to `pdf` with a headless Chrome; None if no Chrome is found."""
-    chrome = os.environ.get(CHROME) or DEFAULT_CHROME
-    if not Path(chrome).exists() and shutil.which(chrome) is None:
-        return None
-    subprocess.run(
-        [
-            chrome,
-            "--headless=new",
-            "--disable-gpu",
-            "--no-pdf-header-footer",
-            f"--print-to-pdf={pdf}",
-            html.resolve().as_uri(),
-        ],
-        check=True,
-        capture_output=True,
-    )
-    return pdf
+def page(template: str, numbers: dict[str, str]) -> str:
+    """The filled page, with the template's own leading comment replaced by a note on where
+    the page comes from."""
+    body = fill(template, numbers)
+    if body.startswith("<!--"):
+        body = body[body.index("-->") + 3 :].lstrip("\n")
+    return HEADER + "\n" + body
 
 
 def rule_levels(checks_dir: Path) -> dict[str, float]:
@@ -110,23 +101,33 @@ def rule_levels(checks_dir: Path) -> dict[str, float]:
     return out
 
 
-def build(results: Path, out: Path, *, rehearsal: bool = False) -> dict[str, Path | None]:
-    """Fill the note from `results` (the folders the other commands write) into `out`: the
-    zero-ceiling figure, the filled page and, if a Chrome is found, its PDF."""
+# The figures the page shows, as {name on the page: (source, file)}: "report" is the folder
+# `fleetoffer report` writes, "here" the zero-ceiling figure drawn below.
+FIGURES = {
+    "figure-1.png": ("report", "figure3-average-bare.png"),
+    "figure-2.png": ("here", "zero-ceilings-bare.png"),
+}
+
+
+def build(results: Path, out: Path, *, rehearsal: bool = False) -> dict[str, Path]:
+    """Fill the report from `results` (the folders the other commands write) into `out`: the
+    page (`README.md`) and the figures it shows."""
     results, out = Path(results), Path(out)
     out.mkdir(parents=True, exist_ok=True)
     numbers = development(results / "levels", results / "checks")
     reached = rule_levels(results / "checks")
     numbers |= {f"level_{k.split()[0]}": pct(v, 2) for k, v in reached.items()}
-    zero_ceiling_figure(results / "levels", out / "zero-ceilings.png", reached)
     report = results / ("report-rehearsal" if rehearsal else "report")
-    for figure in sorted(report.glob("figure*.png")):
-        shutil.copy(figure, out / figure.name)
     numbers |= later(results, report, reached, numbers, rehearsal=rehearsal)
     numbers |= {"title": TITLE, "author": AUTHOR}
-    page = out / "note.html"
-    page.write_text(fill(TEMPLATE.read_text(), numbers))
-    return {"html": page, "pdf": print_pdf(page, out / "note.pdf")}
+    with tempfile.TemporaryDirectory() as here:
+        zero_ceiling_figure(results / "levels", Path(here) / "zero-ceilings.png", reached)
+        folders = {"report": report, "here": Path(here)}
+        for name, (source, file) in FIGURES.items():
+            shutil.copy(folders[source] / file, out / name)
+    written = out / "README.md"
+    written.write_text(page(TEMPLATE.read_text(), numbers))
+    return {"page": written}
 
 
 ACCOUNTING_ROWS = {
@@ -183,7 +184,7 @@ def accounting_html(frame: pd.DataFrame, form: str) -> str:
     return "\n".join(out)
 
 
-# Table I: the accounting across periods, on the day-average base set.
+# Table 1: the accounting across periods, on the day-average base set.
 PERIODS = {
     "development": "May–Aug 2019",
     "evaluation": "Sep 2019–Feb 2020",
@@ -215,62 +216,59 @@ def _share(x: float) -> str:
 
 
 def accounting_table(frame: pd.DataFrame, form: str = "average") -> str:
-    """Table I's rows: per period, the exact band and the perfect-knowledge offer in kWh, then
-    each later step as a share of the perfect-knowledge offer for the learned, population and
-    stratified models, and the delivery rate of the rule as run. A step a period does not have
-    (the second site sweeps the one-dimensional offer only) is a dash."""
+    """Table 1 as a markdown table, one column per period: the scored weekdays, the exact band
+    and the perfect-knowledge offer in kWh, then each later step as a share of the
+    perfect-knowledge offer for the learned, population and stratified models (L / P / S), and
+    the delivery rate of the rule as run. A step a period does not have (the second site sweeps
+    the one-dimensional offer only) is a dash."""
     rows = frame[frame["form"] == form]
-    head = "".join(f'<th colspan="3">{label}</th>' for label in PERIODS.values())
-    models = "".join("<th>L</th><th>P</th><th>S</th>" for _ in PERIODS)
-    out = [
-        f"<thead><tr><th></th>{head}</tr><tr><th></th>{models}</tr></thead>",
-        "<tbody>",
-    ]
 
     def first(period: str, step: str) -> pd.Series | None:
         mine = rows[(rows["period"] == period) & (rows["step"] == step)]
         return mine.iloc[0] if len(mine) else None
 
-    band, perfect = [], []
-    for period in PERIODS:
-        b, p = first(period, "exact band of the true sets"), first(period, "perfect knowledge")
-        band.append(f'<td colspan="3">{b["size_mean_kwh"]:.1f}</td>' if b is not None else "")
-        band[-1] = band[-1] or '<td colspan="3">–</td>'
-        if p is None:
-            perfect.append('<td colspan="3">–</td>')
-        else:
-            of_band = f" ({100 / b['share_of_perfect']:.0f}%)" if b is not None else ""
-            perfect.append(f'<td colspan="3">{p["size_mean_kwh"]:.1f}{of_band}</td>')
-    counts = []
+    counts, band, perfect = [], [], []
     for period in PERIODS:
         mine = rows[rows["period"] == period]
-        if "days" not in mine.columns or mine["days"].isna().all():
-            counts.append('<td colspan="3">–</td>')
-            continue
-        every = mine.loc[mine["step"] == "perfect knowledge", "days"]
-        fewest = mine.loc[mine["step"].isin(levels.SWEPT_STEPS), "days"].min()
-        text = f"{int(every.iloc[0])}" if len(every) else "–"
-        if pd.notna(fewest) and len(every) and fewest < every.iloc[0]:
-            text += f" ({int(fewest)})"
-        counts.append(f'<td colspan="3">{text}</td>')
-    out.append("<tr><td>Scored weekdays (fewest in a row)</td>" + "".join(counts) + "</tr>")
-    out.append("<tr><td>Exact band (kWh)</td>" + "".join(band) + "</tr>")
-    out.append("<tr><td>Perfect knowledge (kWh)</td>" + "".join(perfect) + "</tr>")
+        text = "–"
+        if "days" in mine.columns and not mine["days"].isna().all():
+            every = mine.loc[mine["step"] == "perfect knowledge", "days"]
+            fewest = mine.loc[mine["step"].isin(levels.SWEPT_STEPS), "days"].min()
+            if len(every):
+                text = f"{int(every.iloc[0])}"
+                if pd.notna(fewest) and fewest < every.iloc[0]:
+                    text += f" ({int(fewest)})"
+        counts.append(text)
+        b, p = first(period, "exact band of the true sets"), first(period, "perfect knowledge")
+        band.append(f"{b['size_mean_kwh']:.1f}" if b is not None else "–")
+        if p is None:
+            perfect.append("–")
+        else:
+            of_band = f" ({100 / b['share_of_perfect']:.0f}%)" if b is not None else ""
+            perfect.append(f"{p['size_mean_kwh']:.1f}{of_band}")
+    lines = [
+        "| | " + " | ".join(PERIODS.values()) + " |",
+        "|---|" + "---|" * len(PERIODS),
+        "| Scored weekdays (fewest in a row) | " + " | ".join(counts) + " |",
+        "| Exact band (kWh) | " + " | ".join(band) + " |",
+        "| Perfect knowledge (kWh, share of the band) | " + " | ".join(perfect) + " |",
+    ]
     for step, label in SHARE_ROWS.items():
         cells, rates = [], []
         for period in PERIODS:
             mine = rows[(rows["period"] == period) & (rows["step"] == step)]
+            if mine.empty:
+                cells.append("–")
+                rates.append("–")
+                continue
             by_model = {str(w)[0]: r for w, r in zip(mine["who"], mine.itertuples(), strict=True)}
-            for model in MODELS:
-                r = by_model.get(model)
-                cells.append(f"<td>{_share(r.share_of_perfect) if r is not None else '–'}</td>")
-                rate = f"{100 * r.delivered:.0f}" if r is not None else "–"
-                rates.append(f"<td>{rate}</td>")
-        out.append(f"<tr><td>{label}</td>" + "".join(cells) + "</tr>")
+            got = [by_model.get(m) for m in MODELS]
+            cells.append(" / ".join(_share(r.share_of_perfect) if r else "–" for r in got))
+            rates.append(" / ".join(f"{100 * r.delivered:.0f}" if r else "–" for r in got))
+        lines.append(f"| {label} | " + " | ".join(cells) + " |")
         if step == "day-level rule as run":
-            out.append("<tr><td>&#8195;days delivered (%)</td>" + "".join(rates) + "</tr>")
-    out.append("</tbody>")
-    return "\n".join(out)
+            lines.append("| Days delivered by that rule (%) | " + " | ".join(rates) + " |")
+    return "\n".join(lines)
 
 
 def grid_level_at_or_above(q: float) -> float:
@@ -508,7 +506,7 @@ def model_order_sentence(frame: pd.DataFrame) -> str:
         "The order of the models reverses between the two: under the fixed allocation the "
         "population model keeps the most, under the hindsight split the learned model does "
         f"(learned and population under the hindsight split: {'; '.join(pairs)}, in the order "
-        "of Table I's columns)"
+        "of Table 1's columns)"
     )
     if other_in:
         text += f"; the order differs {', '.join(other_in)}"

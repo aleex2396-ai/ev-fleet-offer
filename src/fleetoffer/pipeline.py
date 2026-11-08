@@ -1126,7 +1126,7 @@ def main(argv: list[str] | None = None) -> int:
     rep.add_argument("--out", type=Path, default=None)
     rep.add_argument("--rehearsal", action="store_true")
 
-    nt = commands.add_parser("note", help="the note on the results, filled from the tables, as PDF")
+    nt = commands.add_parser("note", help="the full report in report/, filled from the tables")
     nt.add_argument("--results", type=Path, default=Path("results"))
     nt.add_argument("--out", type=Path, default=None)
     nt.add_argument("--rehearsal", action="store_true")
@@ -1225,10 +1225,9 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "note":
         from fleetoffer import note
 
-        folder = "note-rehearsal" if args.rehearsal else "note"
-        out = args.out or args.results / folder
-        built = note.build(args.results, out, rehearsal=args.rehearsal)
-        print(f"wrote {built['html']}" + (f" and {built['pdf']}" if built["pdf"] else ""))
+        default = args.results / "note-rehearsal" if args.rehearsal else Path("report")
+        built = note.build(args.results, args.out or default, rehearsal=args.rehearsal)
+        print(f"wrote {built['page']} and its figures")
     elif args.command == "requirements":
         print(calibrate.requirements_table().to_string(index=False))
         print()
