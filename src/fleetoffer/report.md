@@ -169,3 +169,21 @@ The analysis plan's Figures 1 to 4 are drawn by `uv run fleetoffer report` into 
 4. Z. J. Lee, T. Li and S. H. Low, "ACN-Data: analysis and applications of an open EV charging dataset," in *Proc. ACM e-Energy*, 2019.
 5. S. Yan, F. Parise and E. Y. Bitar, "Data-driven approximations of chance constrained programs in nonstationary environments," *IEEE Control Systems Letters*, vol. 6, 2022.
 6. K. Mukhi, C. Qu, P. You and A. Abate, "Robust aggregation of electric vehicle flexibility," in *Proc. HSCC*, 2025.
+
+## Appendix A. Use of AI tools
+
+**Decided by the author.**
+
+- The research question: how drivers' behaviour, and its change over time, limits the flexibility a fleet can offer, chosen over a framing around battery wear.
+- The design, a fleet offer built from per-car bounds and scored by delivery, chosen among candidate designs drafted with AI assistance.
+- The roles of the data: Caltech before March 2020 for development, the months from the closure as the sealed test, JPL as a single replication.
+- The predictions in [`docs/predictions.md`](../docs/predictions.md), written before any fleet result was seen and stored unedited.
+- After the first fleet results: to report the registered rule's zero offers as the primary result rather than replace them; to add calibration on delivery as a secondary analysis, labelled as chosen after that look; to reset no threshold; and to add no model, tuning or controller before the evaluation.
+- The diagnostic in which the cars that take nothing more are known, to test whether the charging status an operator sees at 10:00 would recover the offer; the rules for stating results (measured comparisons first, mechanisms only as "consistent with", registered results, diagnostics and future work kept apart); and the conclusion that reports both readings.
+- What the project claims and what is published.
+
+**Done with AI assistance:**
+
+- The literature search, through the OpenAlex API; theorem statements were checked against the papers' texts.
+- Majority of the code, tests and runs, written and run by an AI coding assistant (Claude Code) and reviewed by the author; each commit carries a co-author line.
+- The repo organised by an AI assistant.
