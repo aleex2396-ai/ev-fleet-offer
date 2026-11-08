@@ -407,7 +407,7 @@ def hypotheses_table(hyp: dict) -> str:
     ]
     out = [
         "<thead><tr><th>Hypothesis</th><th>Design</th><th>Caltech, Sep 2019–Feb 2020</th>"
-        "<th>Caltech, from Mar 2020</th></tr></thead><tbody>"
+        "<th>Caltech, from Mar 2020 (H1 and H4 descriptive)</th></tr></thead><tbody>"
     ]
     out += [f"<tr><td>{a}</td><td>{b}</td><td>{c}</td><td>{d}</td></tr>" for a, b, c, d in rows]
     for track, label in (("frozen", "Caltech pipeline frozen"), ("updating", "updating on JPL")):
@@ -691,32 +691,50 @@ def percar_numbers(scores: pd.DataFrame, frozen: pd.DataFrame) -> dict[str, str]
 def baseline_sentence(loss: pd.Series) -> str:
     """What Section 4 of the plan requires the results to say: for each target, whether the
     learned model beats each driver's own past and the stratified table on mean pinball loss
-    (all drivers, model-selection months). A loss within 1% of a baseline's counts as level."""
+    (all drivers, model-selection months), and any driver group in which a baseline is lower.
+    A loss within 1% of a baseline's is called level; the plan does not fix that margin."""
     names = {"driver": "each driver's own past", "stratified": "the stratified table"}
     unit = {"stay": "h", "energy": "kWh"}
-    failed: dict[str, list[tuple[str, float, float]]] = {}
+    level: dict[str, list[tuple[str, float, float]]] = {}
     for target in ("stay", "energy"):
         mine = loss[("all", "gbdt", target)]
         for model, name in names.items():
             other = loss[("all", model, target)]
             if mine > 0.99 * other:
-                failed.setdefault(target, []).append((name, mine, other))
-    if not failed:
-        return (
-            "The trees beat each driver's own past and the stratified table on both targets, "
-            "by more than 1% of the mean loss."
-        )
+                level.setdefault(target, []).append((name, mine, other))
     parts = []
-    for target, rows in failed.items():
-        against = " or ".join(
-            f"{n} ({a:.3f} against {b:.3f} {unit[target]}, within 1%)" for n, a, b in rows
-        )
+    for target, rows in level.items():
+        against = " and ".join(f"{n} ({a:.3f} against {b:.3f} {unit[target]})" for n, a, b in rows)
         given = " and ".join(n for n, _, _ in rows)
         parts.append(
-            f"on {target} the trees do not beat {against}, so for {target} the learned "
-            f"model's gain over the population rule is what {given} already gives"
+            f"on {target} the trees are level with {against}, within 1%, so for {target} the "
+            f"learned model's gain over the population rule is what {given} already gives"
         )
-    return "By the plan's own test (its Section 4), " + "; and ".join(parts) + "."
+    lower = []
+    for group in ("known", "anonymous"):
+        for target in ("stay", "energy"):
+            mine = loss.get((group, "gbdt", target))
+            for model, name in names.items():
+                other = loss.get((group, model, target))
+                if mine is not None and other is not None and other < mine:
+                    lower.append(
+                        f"for {group} drivers {name} is lower than the trees on {target} "
+                        f"({other:.3f} against {mine:.3f} {unit[target]})"
+                    )
+    if not parts and not lower:
+        return (
+            "The trees beat each driver's own past and the stratified table on both targets "
+            "and for known and anonymous drivers alike, by more than 1% of the mean loss."
+        )
+    text = "Section 4 of the plan asks whether the trees beat each driver's own past and the "
+    text += "stratified table (a loss within 1% is called level here; the plan fixes no margin)"
+    if parts:
+        text += ": " + "; and ".join(parts)
+    else:
+        text += ": the trees beat both on both targets over all drivers"
+    if lower:
+        text += "; " + "; ".join(lower)
+    return text + "."
 
 
 def sealed_composition(folder: Path, start: pd.Timestamp | None) -> dict[str, str]:
@@ -863,6 +881,30 @@ def mechanism_numbers(table: pd.DataFrame, median_cars: float) -> dict[str, str]
     }
 
 
+def known_segment_offer(table: pd.DataFrame, reached: dict[str, float]) -> dict[str, str]:
+    """With the empty cars known, the largest mean one-dimensional offer of the population and
+    stratified models (5k, 6k) at any positive swept level up to the highest level the
+    population and stratified registered rules reached (the grid level at or above it)."""
+    top = grid_level_at_or_above(max(reached["population rule"], reached["stratified rule"]))
+    rows = table[
+        (table["form"] == "segment")
+        & table["model"].isin(["5k", "6k"])
+        & (table["level"] > 0)
+        & (table["level"] <= top + 1e-12)
+    ]
+    return {
+        "dev_known_seg_max": f"{float(rows['size_mean_kwh'].max()):.4f}",
+        "dev_known_seg_upto": pct(top, 0),
+    }
+
+
+def two_sided_bound(scored_days: int) -> str:
+    """The two-sided bound of [3, Prop. 4.1] on the share of failed days from the first level,
+    target + (max(a_1, 1 - a_1) + gamma) / (gamma T), for comparison with bound (4)."""
+    a1, gamma, target = daylevel.ACI_START, daylevel.ACI_GAMMA, daylevel.TARGET_MISS
+    return pct(target + (max(a1, 1 - a1) + gamma) / (gamma * scored_days))
+
+
 MODEL_WORDS = {"4": "learned", "5": "population", "6": "stratified"}
 TRACK_WORDS = {"frozen": "with the Caltech pipeline frozen", "updating": "updating on JPL days"}
 
@@ -941,6 +983,11 @@ def later(
     days = pd.read_csv(frozen / "days.csv.gz", dtype={"arm": str})
     out |= offer_days(days, {"4": "a", "5": "b"}, "ev_h1_reg")
     out |= mechanism_numbers(table, float(numbers["median_cars"]))
+    out |= known_segment_offer(table, reached)
+    start = evaluation.OFFERS_FROM[f"{prefix}evaluation"]
+    learned = days[days["arm"] == "4"].copy()
+    learned["decision_time"] = pd.to_datetime(learned["decision_time"], utc=True)
+    out["ev_aci_two_sided"] = two_sided_bound(len(evaluation.scored_days(learned, start)))
     out["table_accounting"] = accounting_table(frame)
     out["table_hypotheses"] = hypotheses_table(made["hypotheses"])
     out["jpl_left_out_sentence"] = left_out_sentence(results / f"evaluate-{prefix}jpl")

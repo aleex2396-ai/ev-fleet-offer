@@ -8,7 +8,7 @@ printed by `fleetoffer requirements`, and are checked in `tests/test_calibrate.p
 Each paper's symbols are kept within its section. In particular α is the scaling factor of
 programme (24) in the first two sections, the share of discarded samples in the 2022
 theorem, and the target miss rate in Gibbs and Candès; γᵢ is a per-car translation in the
-2024 paper, γ the step size of adaptive conformal inference, and, in Theorem 5 of the 2022
+2025 paper, γ the step size of adaptive conformal inference, and, in Theorem 5 of the 2022
 paper, the margin by which its constraint is tightened.
 
 ## The per-car set
@@ -21,10 +21,10 @@ U(d, e) = { u : 0 ≤ u_k ≤ c for k ≤ d;  u_k = 0 for k > d;  δ (u₁ + …
 
 Because u ≥ 0, the ceiling on the total also bounds the cumulative energy at every step. This
 is a charging-only special case of the generalised battery model of Al Taha, Vincent and
-Bitar (2024, equation (2)), built from their Example 1 with three changes: no discharge; the
+Bitar (2025, equation (2)), built from their Example 1 with three changes: no discharge; the
 energy ceiling as the upper limit on cumulative energy, in place of the battery's free capacity
-(their equation (6)); and no lower limit, in place of their equation (7), which from the
-deadline on requires the driver's desired final state of charge. The zero profile lies in every U(d, e), so "the fleet can
+(their equation (6)); and no lower limit, in place of their equation (7), which after the
+deadline requires the driver's desired final state of charge. The zero profile lies in every U(d, e), so "the fleet can
 follow a profile" never means that each driver received the energy they needed.
 
 The **true set** of a car present at 10:00 uses its actual unplug time (20:00 if it is still
@@ -34,7 +34,7 @@ to leave (a lower quantile of remaining stay, rounded down to the grid) and an e
 no higher than it is predicted to take (a lower quantile of remaining energy), with the same
 cap.
 
-## Aggregation: Al Taha, Vincent and Bitar (2024)
+## Aggregation: Al Taha, Vincent and Bitar (2025)
 
 Al Taha, Vincent and Bitar, "An efficient method for quantifying the aggregate
 flexibility of plug-in electric vehicle populations", IEEE Transactions on Smart Grid 16(4),
@@ -54,12 +54,14 @@ flexibility of plug-in electric vehicle populations", IEEE Transactions on Smart
   presents as the way to avoid solving a disaggregation linear programme.
 - **Example 1** (equations (4)–(7)) builds a car's set from a power range (which may include
   discharge), an upper limit on cumulative energy, the battery's free capacity (equation (6)),
-  and a lower limit (equation (7)) that from the deadline on is the driver's desired final
+  and a lower limit (equation (7)) that after the deadline is the driver's desired final
   state of charge less the initial one. The sets above replace the upper limit with the energy
   ceiling and drop the lower one.
 - The paper's base set (equation (11)) is the average of the present cars' vectors; any
-  H-polytope base set is allowed. Here h₀ is fixed from the training period and is the same
-  for every arm (analysis plan, Section 3); the paper's choice is a sensitivity.
+  H-polytope base set is allowed. The registered arms use h₀ fixed from the training period,
+  the same for every arm (analysis plan, Section 3); the secondary analysis and the
+  perfect-knowledge offer use the day-average base set, computed from the day's sets as
+  described below ("The car's vector in the base set").
 
 ## What this project adds: containment under one-sided bounds
 
@@ -103,12 +105,13 @@ C_t): for a fixed base set, the width is α times a constant. The offer's width 
 width are reported side by side at 14:00, 16:00 and 18:00, so the conservatism of the inner
 approximation is measured. The exact aggregate set for this class of sets (charging only, one
 connection interval, limits on total energy), not only its band, is a generalised polymatroid
+(a car with deadline 0 has the set {0}, and a ceiling above c δ d is a redundant row)
 (Mukhi, Qu, You and Abate, 2025, Corollary 3.9; Mukhi, Loho and Abate, IEEE Transactions on
 Smart Grid 17(3), 2131–2142, 2026).
 
 ## How programme (24) is solved
 
-Besides the sum condition (20), the conditions of Theorem 2 are Lemma 1 of the 2024 paper
+Besides the sum condition (20), the conditions of Theorem 2 are Lemma 1 of the paper
 applied to each car, and Lemma 1 is necessary and sufficient for γᵢ + ΓᵢU₀ ⊆ Uᵢ whatever
 half-space description is used for U₀ and Uᵢ, provided U₀ is nonempty (the lemma's
 assumption; here U₀ contains the zero profile). `offer.solve` therefore writes each set with irredundant rows (its power box and one
@@ -138,6 +141,10 @@ feasible point, and with α ≥ 0 its optimum is 0.
 *Proof.* For such a car, γᵢ + Γᵢu₀ must have k-th entry 0 for every u₀ in U₀. At u₀ = 0 this
 gives (γᵢ)_k = 0; U₀ contains small multiples of the k-th unit vector, so (Γᵢ)_kk = 0. Then
 the (k, k) entry of Σ Γᵢ = αI gives α = 0. ∎
+
+This is the structure-preserving analogue of the paper's Remark 4: the affine maps let one car
+lack a direction of U₀, but the constraint Σ Γᵢ = αI cannot absorb a direction every present
+car lacks.
 
 The day-average base set of equation (11), with each car's vector written as above, cannot
 meet this case, since its power vector is then zero wherever no car can charge. A base set fixed from the training period can: on any day on
@@ -233,7 +240,8 @@ delivered if, for all nine profiles, it is at most 10⁻⁴ kWh (`offer.DELIVERY
 rounding tolerance). **Secondary check.** The largest energy the cars actually present can
 take, each within its true set, with their total power at no step above the profile's; the
 shortfall is the profile's energy minus that. It is zero exactly when the profile can be split
-among the cars, and it is never above the primary shortfall.
+among the cars, and, whenever the allocation is non-negative (always when containment holds),
+it is never above the primary shortfall.
 
 **When a day's outcome is known.** The outcome is defined within the horizon, but the energy a
 car took between 10:00 and 20:00 is estimated from its recorded total (`docs/data.md`, check
@@ -424,7 +432,9 @@ quantile, and the next day's bounds all hold with probability at least 1 − a.
   the level used that day. A working level at or below 0 gives the trivial bound.
 - **Secondary, split conformal** at a = 0.10, only on days whose window holds at least 40
   scored days (check D8); on other days the secondary arms use their own copy of the primary
-  rule, and the record says which ran.
+  rule, and the record says which ran. That copy is updated on split days with the split
+  level's outcome, so the bound on the share of failed days below is claimed for the primary
+  rule only.
 
 **What is kept of Proposition 4.1, and the step.** Summing the update over T scored days that
 begin at working level a_S gives a_{S+T} = a_S + γ Σ (0.10 − errₜ), so the share of failed
@@ -492,7 +502,7 @@ this result as the one that would apply if its assumptions held.
 |---|---|---|
 | Independent days (2022 theorem; also the reading of a long-run share) | Cars on one day share the day's events, prices and calendar; drivers return | Not given; cars on one day are not treated as independent, and uncertainty is resampled by whole weeks |
 | A known drift bound ρ on whole-day configurations (condition (9)) | A day is a varying number of cars, each with a deadline and an energy; the 2020 closure is a jump no earlier data can measure | Not given; a norm on that space would itself be a choice |
-| Enough days (Theorem 4) | 483 weekdays in development (computed), so 312 is met and 1,121 missed by 638; a calendar year has 261 weekdays (computed), about 250 once holidays are removed; 182 in 2021 (computed) | Met at the first setting on development data only |
+| Enough days (Theorem 4) | 483 calendar weekdays in development (computed), fewer of them scored, so 312 is met on calendar weekdays and 1,121 missed by at least 638; a calendar year has 261 weekdays (computed), about 250 once holidays are removed; 182 in 2021 (computed) | Met at the first setting on development data only |
 | A fixed finite decision set (Theorem 4), or a constraint Lipschitz in the decision on a bounded set (Theorem 5) | The offer is fitted continuously from the day's cars | Not met for Theorem 4; a grid of 101 scales is the closest reading. Theorem 5 would need a Lipschitz constant for the day's shortfall in the offer's scale, which is not derived here |
 | Exchangeable days (split conformal) | The closure and the 2021 reopening break exchangeability | Its 90% is an empirical target across the change |
 | Each outcome known before the next decision (adaptive conformal) | A day's outcome uses each car's recorded energy total, known only at unplug (check D1's fallback), so a car that stays overnight delays it past the next decision | Not met on every day; the share of days whose outcome is known before the next decision is reported, and the rule is updated as outcomes arrive |

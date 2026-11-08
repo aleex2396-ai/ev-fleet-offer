@@ -7,7 +7,7 @@ Notation follows `docs/theory.md`. The horizon has K steps of delta hours (40 st
 
 with deadline d (a number of steps), energy ceiling e (kWh) and power cap c (kW).
 
-The inner approximation is programme (24) of Al Taha, Vincent and Bitar (2024): maximise
+The inner approximation is programme (24) of Al Taha, Vincent and Bitar (2025): maximise
 alpha subject to the conditions of their Theorem 2 with P = alpha * I. Those conditions are
 Lemma 1 of the paper applied to each car, and Lemma 1 is necessary and sufficient for
 gamma_i + Gamma_i U0 to lie in U_i whatever half-space description is used for the two sets.

@@ -10,11 +10,11 @@
 - **Problem.** An aggregator can sell the charging flexibility of the cars at a car park only if it can say in advance how much charging it can shift, and then deliver it. That depends on when each car will leave and how much energy it will still take (here, energy shaped by the site's own charging scheduler), both uncertain and both changing over time.
 - **Decision.** At 10:00 on each weekday, for the cars plugged in, a set of fleet charging profiles for 10:00 to 20:00 in 15-minute steps. Nothing after 10:00 is used.
 - **Two views of each car.** A lower bound on its remaining stay and on its remaining energy, from a **population** view (the site's recent sessions, given how long the car has been plugged in) or a **learned** view (a model of that car and its driver).
-- **Models.** Learned: gradient-boosted quantile regression on inputs known at 10:00, refitted monthly. Against it: the Kaplan–Meier population rule, a stratified table, each driver's own history, the mixture predictor of Lee, Li and Low (2019) and the typed plan.
-- **Per-car sets.** A charging-only case of the battery model of Al Taha, Vincent and Bitar (2024), with a deadline no later and an energy ceiling no higher than the car's lower bounds. Whenever every bound holds, the offer lies inside the fleet's true set.
+- **Models.** Learned: gradient-boosted quantile regression on inputs known at 10:00, refitted monthly. Against it: the Kaplan–Meier population rule, a stratified table, each driver's own history, the mixture predictor of Lee, Li and Low (2019) and the typed plan; a small network and linear quantile regression are scored too.
+- **Per-car sets.** A charging-only case of the battery model of Al Taha, Vincent and Bitar (2025), with a deadline no later and an energy ceiling no higher than the car's lower bounds. Whenever every bound holds, the offer lies inside the fleet's true set.
 - **Offer.** Programme (24) of the same paper (Theorem 2): a shifted and scaled copy of a template set (the base set), with each car's share of any offered profile fixed at 10:00 by its affine allocation.
 - **Offer form.** The registered arms use the registered one-dimensional fallback, which moves charging out of 10:00–11:00 and into 11:00–13:00: with the base set fixed in advance, the perfect-knowledge offer's scale was below 0.2 on 37.6% of model-selection weekdays (threshold 25%). The secondary analysis uses programme (24) with the day-average base set.
-- **Calibration.** One quantile level per day for every car, set from past days by adaptive conformal inference (Gibbs and Candès, 2021) to target delivery on 90% of days, beside a union bound across the cars. What each rule guarantees, and what the finite-sample theorem of Yan, Parise and Bitar (2022) would need with days as samples, is in [`docs/theory.md`](docs/theory.md).
+- **Calibration.** One quantile level per day for every car, set from past days by adaptive conformal inference (Gibbs and Candès, 2021), targeting 90% of days on which every bound holds (registered) or on which the offer is delivered (secondary), beside a union bound across the cars. What each rule guarantees, and what the finite-sample theorem of Yan, Parise and Bitar (2022) would need with days as samples, is in [`docs/theory.md`](docs/theory.md).
 - **Scoring.** Each offer is replayed against the cars actually present and checked on nine profiles, on the public ACN-Data sessions at Caltech, with JPL as a second site.
 - **Data roles.** Caltech through August 2019: development (May to August 2019 for model selection). September 2019 to February 2020: frozen evaluation. From 1 March 2020: sealed test, opened once. JPL: replication, run once.
 - **Registration.** The hypotheses, thresholds and analyses were fixed in the git tag `analysis-plan` before the test months were opened; "registered" below means fixed there. The predictions written before any fleet result was seen are in [`docs/predictions.md`](docs/predictions.md).
@@ -25,10 +25,10 @@
 **Per-car learning tightens each car's bounds; with each car's share of the offer fixed in the morning, the gain does not reach the fleet offer.** September 2019 to February 2020:
 
 - **Per car.** At matched coverage (90.7% for both), the learned bound keeps 2.93 h of each car's remaining stay against 2.01 h for the population bound.
-- **Fleet.** Calibrated to be delivered on 90% of days, the offer made from the learned bounds is 0.18 kWh against 1.76 kWh from the population bounds, delivered on 91% and 90% of days: smaller by 1.57 kWh (95% interval 1.36 to 1.78).
+- **Fleet** (secondary analysis, calibrated on delivery, chosen after the May to August 2019 look; under the registered rule both offers are zero). Calibrated to be delivered on 90% of days, the offer made from the learned bounds is 0.18 kWh against 1.76 kWh from the population bounds, delivered on 91% and 90% of days: smaller by 1.57 kWh (95% interval 1.36 to 1.78).
 - **Against perfect knowledge.** Those offers are 0.4% and 3.9% of the 45.6 kWh the same method offers with perfect knowledge of every car.
 
-| Hypothesis | Sep 2019 to Feb 2020 (116 scored weekdays) | Sealed months (26) |
+| Hypothesis | Sep 2019 to Feb 2020 (116 scored weekdays) | Sealed months (26; H1 and H4 descriptive) |
 |---|---|---|
 | H1: the learned offer is at least 10% larger than the population offer (registered rule, one-dimensional fallback) | Fail, with both offers in effect zero | Not testable: both offers are zero |
 | H1 with both calibrated on delivery (secondary, chosen after the May to August 2019 look) | 0.18 against 1.76 kWh, delivered on 91% and 90% of days; difference −1.57 kWh (−1.78 to −1.36) | 0 against 0.84 kWh, delivered on 100% and 92%; difference −0.84 kWh (−1.53 to −0.16) |
@@ -37,10 +37,10 @@
 | H4: the learned stay bound keeps at least 0.5 h more than the population bound at matched 90% coverage | Pass: 2.93 against 2.01 h | Pass: 2.11 against 1.52 h |
 
 - Intervals are 95%, resampling whole weeks.
-- Each offer is given with the share of days it was delivered on; in the sealed months the two are not at matched delivery (100% and 92%).
+- Each offer is given with the share of days it was delivered on; in the sealed months the two are not at matched delivery (100% and 92%), nor at JPL with the Caltech pipeline frozen (99% and 96%).
 - The sealed months are the scored weekdays from 1 March 2020: 9 before the campus closure and 17 from July 2021.
 - **JPL**, a replication run once and read descriptively:
-  - With the Caltech pipeline frozen, the calibrated learned offer is 0.28 kWh against 0.54 kWh for the population, delivered on 99% and 96% of days.
+  - With the Caltech pipeline frozen, the learned offer calibrated on delivery is 0.28 kWh against 0.54 kWh for the population, delivered on 99% and 96% of days.
   - Updating on JPL days, 1.88 against 1.87 kWh, both delivered on 90% of days: a difference of 0.01 kWh (95% interval −0.52 to 0.55).
   - One of its 37 runs (the stratified model calibrated on delivery, updating on JPL days) did not finish and is left out; no result here uses it.
 
@@ -53,12 +53,13 @@
 **Where the offer is lost.** Diagnostics added after the first look at May to August 2019 and fixed before the tag; the shares are from those months, and the frozen evaluation gives the same first two.
 
 - With perfect knowledge the offer reaches 42% of the exact band width (39.4 of 93.7 kWh).
-- Under this formulation (one common level, a template, fixed allocation) the offer made from forecasts keeps about 4% of the perfect-knowledge offer (1.55 of 39.4 kWh).
+- Under this formulation (one common level, a template, fixed allocation) the offer made from forecasts keeps about 4% of the perfect-knowledge offer (1.55 of 39.4 kWh). That offer is the population model's, calibrated on delivery and delivered on 88% of days.
 - Knowing which cars take nothing more does not restore it.
 - At level 0.15, every bound of the learned model held on 0% of scored weekdays and the allocation fixed at 10:00 delivered on 1% of them, while a split chosen in hindsight delivered on 100%.
-- Across levels the hindsight split, an upper bound rather than a method, keeps a fifth to a half of the perfect-knowledge offer at 90% delivery (a quarter to three quarters in the frozen evaluation), and there the learned model keeps the most.
+- Across the three models, each at its best level, the hindsight split, an upper bound rather than a method, keeps a fifth to more than half of the perfect-knowledge offer at 90% delivery (a quarter to three quarters in the frozen evaluation), and there the learned model keeps the most.
 - This is consistent with the fixed allocation, which is guaranteed only when every bound holds, being where the offer is lost.
-- The registered offers are zero for a simpler reason: at the small levels the registered rules need, a car's energy bound is zero whenever its chance of taking nothing more is at least that level, and 16.4% of car-days take nothing more.
+- At the small levels the registered rules reach, a car's energy bound is zero whenever its chance of taking nothing more is at least that level, and 16.4% of car-days take nothing more: at the learned and stratified rules' levels every car that took energy was given a zero ceiling, at the population rule's 73%.
+- That alone makes the learned and stratified registered offers zero, but not the population model's, and it is not the only cause: with the cars that take nothing known, the population and stratified one-dimensional offers stay in effect zero at those levels.
 
 **Per-car models**, May to August 2019:
 
@@ -104,7 +105,9 @@ uv run fleetoffer checks               # the checks before the tag, May to Augus
 uv run fleetoffer levels               # offer size against delivery at every level
 uv run fleetoffer options              # calibration on delivery
 uv run fleetoffer accounting           # where the perfect-knowledge offer goes
-uv run fleetoffer evaluate evaluation  # September 2019 to February 2020; then sealed, jpl
+uv run fleetoffer evaluate evaluation  # September 2019 to February 2020
+uv run fleetoffer evaluate sealed      # from 1 March 2020, opened once
+uv run fleetoffer evaluate jpl         # the replication site, run once
 uv run fleetoffer report               # figures, results table and the full report in report/
 ```
 
@@ -114,7 +117,7 @@ uv run fleetoffer report               # figures, results table and the full rep
 
 ## Related work
 
-- Al Taha, Vincent and Bitar (2024): inner approximations of the aggregate flexibility of a fleet whose individual sets are known.
+- Al Taha, Vincent and Bitar (2025): inner approximations of the aggregate flexibility of a fleet whose individual sets are known.
 - Mukhi, Loho and Abate (2026): the exact aggregate set for this class of sets.
 - Mukhi, Qu, You and Abate (2025): an aggregate set certified for cars drawn independently from one known distribution.
 - Lee, Li and Low (2019): forecasts of individual departures on this dataset.

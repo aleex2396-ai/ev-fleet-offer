@@ -31,14 +31,15 @@ Each entry:
 
 ## 2026-11-08: the per-car gain does not reach the fleet offer under a fixed allocation
 
-- Expected: (`docs/predictions.md`, written before any fleet result) the learned offer about
+- Expected: (`docs/predictions.md`, written before any fleet result was seen) the learned offer about
   10% smaller than the population offer; offers failing right after the 2021 reopening and
   recovering by shrinking; a per-car gain of about 2.5 hours.
-- Observed: the registered offers are zero in every period. Calibrated on delivery, the learned
+- Observed: the registered offers are zero, or in effect zero, in every period. Calibrated on delivery, the learned
   offer is 0.18 kWh against 1.76 kWh for the population in the frozen evaluation (delivered on
   91% and 90% of days), although the learned stay bound keeps 2.93 h against 2.01 h at matched
   coverage. With each profile split among the cars in hindsight, the learned model keeps the
-  most of the perfect-knowledge offer (74% against 32%). The reopening could not be tested:
+  most of the perfect-knowledge offer (74% against 32% in the frozen evaluation; an upper bound,
+  not a method). The reopening could not be tested:
   the record ends 15 scored weekdays after it (report, Tables 1 and 2).
 - What changed: the question moves from the forecasts to the decision that uses them: whether
   a rule that splits each request among the cars using only requests already seen, and

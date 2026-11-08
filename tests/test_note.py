@@ -292,8 +292,24 @@ def test_the_baseline_sentence_says_when_the_trees_only_tie_a_baseline():
         {"gbdt": 0.683, "driver": 0.684, "stratified": 1.0},
     )
     text = note.baseline_sentence(tied)
-    assert "on energy the trees do not beat each driver's own past (0.683 against 0.684 kWh" in text
-    assert "stay" not in text and "stratified" not in text
+    level = "on energy the trees are level with each driver's own past (0.683 against 0.684 kWh)"
+    assert level in text
+    assert "the plan fixes no margin" in text
+    assert "on stay" not in text and "stratified table (0" not in text
+    anonymous = pd.concat(
+        [
+            tied,
+            pd.Series(
+                {
+                    ("anonymous", "gbdt", "energy"): 0.49,
+                    ("anonymous", "stratified", "energy"): 0.484,
+                }
+            ),
+        ]
+    )
+    text = note.baseline_sentence(anonymous)
+    assert "for anonymous drivers the stratified table is lower than the trees on energy" in text
+    assert "(0.484 against 0.490 kWh)" in text
 
 
 def test_late_outcomes_count_days_known_before_the_next_decision(tmp_path):
